@@ -32,6 +32,12 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
 
         project.afterEvaluate(p -> registerRootMavenRepo(p, extension));
 
+        // Capability injection — when Gradle resolves metadata for a Root.io-patched coord
+        // (io.root.<G>:<A>:<V>-root.io.N), declare the secondary capability (G, A, V) so
+        // unpatched siblings in the same graph trigger Gradle's capability conflict
+        // detector instead of co-existing on the classpath. See `RootIoCapabilityRule`.
+        project.getDependencies().getComponents().all(RootIoCapabilityRule.class);
+
         project.getConfigurations().all(config -> {
             // Only hook resolvable configurations — non-resolvable ones (e.g. `api`, `implementation`)
             // are for declaring dependencies and do not support eachDependency. Their dependencies
@@ -43,6 +49,16 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
 
             config.getResolutionStrategy().eachDependency(details ->
                     handleDependency(project, details, extension));
+
+            // Capability conflict resolution — picks the highest-version candidate when both
+            // the patched and unpatched siblings of an artifact end up in the graph claiming
+            // the same capability. Capability versions are compared (not coord versions), so
+            // the patched coord's injected (originalGroup, artifact, originalVersion)
+            // competes against the upstream sibling's implicit default capability. Users
+            // who require a different winner in the rare same-version case can override via
+            // standard Gradle dependencySubstitution.
+            config.getResolutionStrategy().getCapabilitiesResolution().all(details ->
+                details.selectHighestVersion());
         });
     }
 
