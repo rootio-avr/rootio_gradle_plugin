@@ -3,13 +3,20 @@ package io.root.patcher;
 import org.gradle.api.Action;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.artifacts.CapabilityResolutionDetails;
+import org.gradle.api.artifacts.ComponentVariantIdentifier;
 import org.gradle.api.artifacts.DependencyResolveDetails;
 import org.gradle.api.artifacts.ModuleVersionSelector;
+import org.gradle.api.artifacts.component.ComponentIdentifier;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.artifacts.repositories.PasswordCredentials;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.provider.Provider;
 import org.gradle.authentication.http.BasicAuthentication;
+
+import java.util.List;
+import java.util.regex.Matcher;
 
 /** Gradle plugin that intercepts dependency resolution and substitutes vulnerable artifacts with Root.io patches. */
 public class RootIoPatcherPlugin implements Plugin<Project> {
@@ -50,15 +57,15 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             config.getResolutionStrategy().eachDependency(details ->
                     handleDependency(project, details, extension));
 
-            // Capability conflict resolution — picks the highest-version candidate when both
-            // the patched and unpatched siblings of an artifact end up in the graph claiming
-            // the same capability. Capability versions are compared (not coord versions), so
-            // the patched coord's injected (originalGroup, artifact, originalVersion)
-            // competes against the upstream sibling's implicit default capability. Users
-            // who require a different winner in the rare same-version case can override via
-            // standard Gradle dependencySubstitution.
-            config.getResolutionStrategy().getCapabilitiesResolution().all(details ->
-                details.selectHighestVersion());
+            // Capability conflict resolution. The common case — patched and upstream
+            // sibling at different versions — is delegated to selectHighestVersion(), which
+            // uses Gradle's own version comparator (handles qualifiers, trailing-zero
+            // normalisation, etc.). The special case — patched coord and upstream sibling
+            // tied at the same base version, which selectHighestVersion() cannot break and
+            // hard-fails on — is detected by RootIoCapabilityResolver and resolved by
+            // picking the patched candidate (same upstream version means identical API
+            // surface plus security fix).
+            config.getResolutionStrategy().getCapabilitiesResolution().all(RootIoPatcherPlugin::resolveCapabilityConflict);
         });
     }
 
@@ -129,6 +136,53 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         } else {
             logger.info("No patch for {}", coords);
         }
+    }
+
+    // Break the same-version capability tie selectHighestVersion() can't decide; defer to it for every other case.
+    static void resolveCapabilityConflict(CapabilityResolutionDetails details) {
+        List<? extends ComponentVariantIdentifier> candidates = details.getCandidates();
+
+        ComponentVariantIdentifier patched = null;
+        for (ComponentVariantIdentifier c : candidates) {
+            ComponentIdentifier cid = c.getId();
+            if (!(cid instanceof ModuleComponentIdentifier)) continue;
+            ModuleComponentIdentifier mid = (ModuleComponentIdentifier) cid;
+            if (!mid.getGroup().startsWith(RootIoCapabilityRule.ROOT_IO_GROUP_PREFIX)) continue;
+            if (!RootIoCapabilityRule.ROOT_IO_SUFFIX.matcher(mid.getVersion()).find()) continue;
+            if (patched != null) {
+                // Shouldn't reach here: Gradle's intra-module conflict resolution collapses io.root.* duplicates first.
+                details.selectHighestVersion();
+                return;
+            }
+            patched = c;
+        }
+        if (patched == null) {
+            details.selectHighestVersion();
+            return;
+        }
+
+        // String equality is correct: the patcher mints the patched version from the upstream string verbatim.
+        ModuleComponentIdentifier patchedId = (ModuleComponentIdentifier) patched.getId();
+        Matcher m = RootIoCapabilityRule.ROOT_IO_SUFFIX.matcher(patchedId.getVersion());
+        m.find();
+        String patchedBaseVersion = patchedId.getVersion().substring(0, m.start());
+
+        boolean sawOther = false;
+        for (ComponentVariantIdentifier c : candidates) {
+            if (c == patched) continue;
+            sawOther = true;
+            ComponentIdentifier cid = c.getId();
+            if (!(cid instanceof ModuleComponentIdentifier)
+                    || !((ModuleComponentIdentifier) cid).getVersion().equals(patchedBaseVersion)) {
+                details.selectHighestVersion();
+                return;
+            }
+        }
+        if (!sawOther) {
+            details.selectHighestVersion();
+            return;
+        }
+        details.select(patched).because("Root.io security patch (same upstream version)");
     }
 
     private static String envOrDefault(String name, String defaultValue) {

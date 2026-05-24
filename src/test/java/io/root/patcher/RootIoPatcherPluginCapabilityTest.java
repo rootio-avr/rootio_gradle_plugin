@@ -333,6 +333,47 @@ class RootIoPatcherPluginCapabilityTest {
                 + insight.getOutput());
     }
 
+    // ===== F11: same-version capability tie — patched coord wins =====
+    //
+    // The customer-reported failure: a patched coord and an unpatched upstream
+    // sibling co-exist in the graph at the same base version, both claiming
+    // the same capability at version 2.18.2. selectHighestVersion() cannot
+    // break the tie and the build hard-fails. The resolver detects the tie
+    // and picks the patched candidate.
+    //
+    // In the customer's project the unpatched coord enters the graph because
+    // an io.spring.dependency-management-supplied BOM constraint pins a
+    // version-less direct decl, which bypasses eachDependency. Reproducing
+    // that exact mechanism inside TestKit + a file-backed repo turns out to
+    // be brittle (constraints behave subtly differently with TestKit's
+    // pluginClasspath); instead this test declares both coords directly and
+    // configures the mock backend to return no patch for the upstream — so
+    // neither dep is substituted — but {@code RootIoCapabilityRule} still
+    // fires on the patched coord, creating the same tied conflict.
+    @ParameterizedTest(name = "Gradle {0}")
+    @MethodSource("gradleVersions")
+    void f11_sameVersionTie_picksPatched(String gradleVersion) throws IOException {
+        File repoDir = new File(projectDir, "local-repo");
+        createFakeArtifact(repoDir, "com.fasterxml.jackson.core", "jackson-core", "2.18.2");
+        createFakeArtifact(repoDir, "io.root.com.fasterxml.jackson.core", "jackson-core", "2.18.2-root.io.1");
+
+        // Mock backend returns NO patch for jackson-core — neither dep gets
+        // substituted by eachDependency, so both coords land in the graph.
+        setupVersionAwareApiServer(req -> emptyJson());
+
+        writeBuildScript(gradleVersion,
+            "implementation(\"com.fasterxml.jackson.core:jackson-core:2.18.2\")\n" +
+            "    implementation(\"io.root.com.fasterxml.jackson.core:jackson-core:2.18.2-root.io.1\")");
+
+        BuildResult result = runListClasspath(gradleVersion);
+        List<String> jars = jarsByPrefix(result, "jackson-core-");
+        assertEquals(1, jars.size(),
+            "Expected exactly one jackson-core jar after same-version tie resolution, got " + jars + "\n"
+                + result.getOutput());
+        assertEquals("jackson-core-2.18.2-root.io.1.jar", jars.get(0),
+            "On a same-version capability tie, the io.root.* patched coord must win — got " + jars.get(0));
+    }
+
     // ===== Shared fixtures =====
 
     /** Plants the canonical bug-repro repo: host-lib transitively → logback-core 1.1.3 + sibling 1.5.8 + patched. */
@@ -441,6 +482,36 @@ class RootIoPatcherPluginCapabilityTest {
                 new FileOutputStream(new File(dir, artifact + "-" + version + ".jar")))) {
             // empty zip is a valid jar
         }
+    }
+
+    /**
+     * Writes a fake BOM/platform POM ({@code <packaging>pom</packaging>} with a
+     * {@code <dependencyManagement>} block constraining the listed coords). The
+     * POM has no JAR — platforms aren't artifacts. Consumed via
+     * {@code implementation(platform("g:a:v"))} in the build script.
+     */
+    private void createFakeBomPlatform(File repoDir, String group, String artifact, String version,
+            List<String> constraintCoords) throws IOException {
+        File dir = new File(repoDir, group.replace('.', '/') + "/" + artifact + "/" + version);
+        dir.mkdirs();
+        StringBuilder constraints = new StringBuilder("<dependencyManagement><dependencies>");
+        for (String coord : constraintCoords) {
+            String[] parts = coord.split(":", 3);
+            constraints.append("<dependency>")
+                .append("<groupId>").append(parts[0]).append("</groupId>")
+                .append("<artifactId>").append(parts[1]).append("</artifactId>")
+                .append("<version>").append(parts[2]).append("</version>")
+                .append("</dependency>");
+        }
+        constraints.append("</dependencies></dependencyManagement>");
+        String pom = "<project><modelVersion>4.0.0</modelVersion>"
+            + "<groupId>" + group + "</groupId>"
+            + "<artifactId>" + artifact + "</artifactId>"
+            + "<version>" + version + "</version>"
+            + "<packaging>pom</packaging>"
+            + constraints
+            + "</project>";
+        Files.writeString(new File(dir, artifact + "-" + version + ".pom").toPath(), pom);
     }
 
     private void createFakeArtifactWithDeps(File repoDir, String group, String artifact,
