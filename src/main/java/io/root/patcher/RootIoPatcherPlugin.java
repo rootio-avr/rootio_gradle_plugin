@@ -15,8 +15,8 @@ import org.gradle.api.logging.Logging;
 import org.gradle.api.provider.Provider;
 import org.gradle.authentication.http.BasicAuthentication;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
 
 /** Gradle plugin that intercepts dependency resolution and substitutes vulnerable artifacts with Root.io patches. */
 public class RootIoPatcherPlugin implements Plugin<Project> {
@@ -138,29 +138,51 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         }
     }
 
-    // Adapts Gradle's CapabilityResolutionDetails to RootIoCapabilityResolver and
-    // applies the returned Decision. Kept static + closure-free so the configuration
-    // cache can serialise it cleanly. Method-reference into Action&lt;...&gt; via
-    // CapabilitiesResolution.all(...).
+    // Break the same-version capability tie selectHighestVersion() can't decide; defer to it for every other case.
     static void resolveCapabilityConflict(CapabilityResolutionDetails details) {
-        List<? extends ComponentVariantIdentifier> rawCandidates = details.getCandidates();
-        List<RootIoCapabilityResolver.Candidate> simpleCandidates = new ArrayList<>(rawCandidates.size());
-        for (ComponentVariantIdentifier raw : rawCandidates) {
-            ComponentIdentifier id = raw.getId();
-            if (id instanceof ModuleComponentIdentifier) {
-                ModuleComponentIdentifier mid = (ModuleComponentIdentifier) id;
-                simpleCandidates.add(RootIoCapabilityResolver.Candidate.module(mid.getGroup(), mid.getVersion()));
-            } else {
-                simpleCandidates.add(RootIoCapabilityResolver.Candidate.nonModule());
+        List<? extends ComponentVariantIdentifier> candidates = details.getCandidates();
+
+        ComponentVariantIdentifier patched = null;
+        for (ComponentVariantIdentifier c : candidates) {
+            ComponentIdentifier cid = c.getId();
+            if (!(cid instanceof ModuleComponentIdentifier)) continue;
+            ModuleComponentIdentifier mid = (ModuleComponentIdentifier) cid;
+            if (!mid.getGroup().startsWith(RootIoCapabilityRule.ROOT_IO_GROUP_PREFIX)) continue;
+            if (!RootIoCapabilityRule.ROOT_IO_SUFFIX.matcher(mid.getVersion()).find()) continue;
+            if (patched != null) {
+                // Shouldn't reach here: Gradle's intra-module conflict resolution collapses io.root.* duplicates first.
+                details.selectHighestVersion();
+                return;
+            }
+            patched = c;
+        }
+        if (patched == null) {
+            details.selectHighestVersion();
+            return;
+        }
+
+        // String equality is correct: the patcher mints the patched version from the upstream string verbatim.
+        ModuleComponentIdentifier patchedId = (ModuleComponentIdentifier) patched.getId();
+        Matcher m = RootIoCapabilityRule.ROOT_IO_SUFFIX.matcher(patchedId.getVersion());
+        m.find();
+        String patchedBaseVersion = patchedId.getVersion().substring(0, m.start());
+
+        boolean sawOther = false;
+        for (ComponentVariantIdentifier c : candidates) {
+            if (c == patched) continue;
+            sawOther = true;
+            ComponentIdentifier cid = c.getId();
+            if (!(cid instanceof ModuleComponentIdentifier)
+                    || !((ModuleComponentIdentifier) cid).getVersion().equals(patchedBaseVersion)) {
+                details.selectHighestVersion();
+                return;
             }
         }
-        RootIoCapabilityResolver.Decision decision = RootIoCapabilityResolver.decide(simpleCandidates);
-        if (decision.isSelect()) {
-            details.select(rawCandidates.get(decision.selectIndex))
-                .because("Root.io security patch (same upstream version)");
-        } else {
+        if (!sawOther) {
             details.selectHighestVersion();
+            return;
         }
+        details.select(patched).because("Root.io security patch (same upstream version)");
     }
 
     private static String envOrDefault(String name, String defaultValue) {
