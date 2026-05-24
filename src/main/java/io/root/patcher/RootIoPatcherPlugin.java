@@ -3,13 +3,20 @@ package io.root.patcher;
 import org.gradle.api.Action;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.artifacts.CapabilityResolutionDetails;
+import org.gradle.api.artifacts.ComponentVariantIdentifier;
 import org.gradle.api.artifacts.DependencyResolveDetails;
 import org.gradle.api.artifacts.ModuleVersionSelector;
+import org.gradle.api.artifacts.component.ComponentIdentifier;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.artifacts.repositories.PasswordCredentials;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.provider.Provider;
 import org.gradle.authentication.http.BasicAuthentication;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** Gradle plugin that intercepts dependency resolution and substitutes vulnerable artifacts with Root.io patches. */
 public class RootIoPatcherPlugin implements Plugin<Project> {
@@ -50,15 +57,15 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             config.getResolutionStrategy().eachDependency(details ->
                     handleDependency(project, details, extension));
 
-            // Capability conflict resolution — picks the highest-version candidate when both
-            // the patched and unpatched siblings of an artifact end up in the graph claiming
-            // the same capability. Capability versions are compared (not coord versions), so
-            // the patched coord's injected (originalGroup, artifact, originalVersion)
-            // competes against the upstream sibling's implicit default capability. Users
-            // who require a different winner in the rare same-version case can override via
-            // standard Gradle dependencySubstitution.
-            config.getResolutionStrategy().getCapabilitiesResolution().all(details ->
-                details.selectHighestVersion());
+            // Capability conflict resolution. The common case — patched and upstream
+            // sibling at different versions — is delegated to selectHighestVersion(), which
+            // uses Gradle's own version comparator (handles qualifiers, trailing-zero
+            // normalisation, etc.). The special case — patched coord and upstream sibling
+            // tied at the same base version, which selectHighestVersion() cannot break and
+            // hard-fails on — is detected by RootIoCapabilityResolver and resolved by
+            // picking the patched candidate (same upstream version means identical API
+            // surface plus security fix).
+            config.getResolutionStrategy().getCapabilitiesResolution().all(RootIoPatcherPlugin::resolveCapabilityConflict);
         });
     }
 
@@ -128,6 +135,31 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             logger.info("Patching {} -> {}", coords, patched);
         } else {
             logger.info("No patch for {}", coords);
+        }
+    }
+
+    // Adapts Gradle's CapabilityResolutionDetails to RootIoCapabilityResolver and
+    // applies the returned Decision. Kept static + closure-free so the configuration
+    // cache can serialise it cleanly. Method-reference into Action&lt;...&gt; via
+    // CapabilitiesResolution.all(...).
+    static void resolveCapabilityConflict(CapabilityResolutionDetails details) {
+        List<? extends ComponentVariantIdentifier> rawCandidates = details.getCandidates();
+        List<RootIoCapabilityResolver.Candidate> simpleCandidates = new ArrayList<>(rawCandidates.size());
+        for (ComponentVariantIdentifier raw : rawCandidates) {
+            ComponentIdentifier id = raw.getId();
+            if (id instanceof ModuleComponentIdentifier) {
+                ModuleComponentIdentifier mid = (ModuleComponentIdentifier) id;
+                simpleCandidates.add(RootIoCapabilityResolver.Candidate.module(mid.getGroup(), mid.getVersion()));
+            } else {
+                simpleCandidates.add(RootIoCapabilityResolver.Candidate.nonModule());
+            }
+        }
+        RootIoCapabilityResolver.Decision decision = RootIoCapabilityResolver.decide(simpleCandidates);
+        if (decision.isSelect()) {
+            details.select(rawCandidates.get(decision.selectIndex))
+                .because("Root.io security patch (same upstream version)");
+        } else {
+            details.selectHighestVersion();
         }
     }
 
