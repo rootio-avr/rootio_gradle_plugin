@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,8 +64,8 @@ public class DepCache {
         dir.mkdirs();
         String cacheKey = coords;
         if (ignoreEntries != null && !ignoreEntries.isEmpty()) {
-            List<String> sorted = new java.util.ArrayList<>(ignoreEntries);
-            java.util.Collections.sort(sorted);
+            List<String> sorted = new ArrayList<>(ignoreEntries);
+            Collections.sort(sorted);
             cacheKey = coords + "|" + String.join(",", sorted);
         }
         return new File(dir, sha1(cacheKey) + ".json");

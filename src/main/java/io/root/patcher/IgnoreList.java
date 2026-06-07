@@ -7,6 +7,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -99,6 +100,6 @@ public final class IgnoreList {
      * suitable for passing to the Root.io API as the {@code ignore} field.
      */
     public List<String> toApiEntries() {
-        return new java.util.ArrayList<>(keys);
+        return new ArrayList<>(keys);
     }
 }

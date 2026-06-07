@@ -11,7 +11,7 @@ The Root.io Gradle plugin silently upgrades vulnerable dependencies to patched v
 When a Gradle build resolves dependencies, the plugin:
 
 1. **Intercepts dependency resolution** for every resolvable configuration in your project
-2. **Queries the Root.io API** to check whether a patched version of each dependency exists
+2. **Queries the Root.io API** to check whether a patched version of each dependency exists, passing any configured ignore list so the server can return the best available alternative
 3. **Substitutes vulnerable coordinates** with patched ones using Gradle's `ResolutionStrategy.eachDependency` mechanism
 4. **Registers the pkg Maven repository** (default: `https://pkg.root.io/maven`) as a repository so patched artifacts resolve automatically
 
@@ -263,7 +263,7 @@ All settings are optional beyond the API key. Configure them inside the `rootio 
 | `ttlHours`         | `24`                         | Hours to cache API responses locally. Set to `0` to disable caching.                                                           |
 | `maxRetries`       | `3`                          | Max retry attempts on transient failures (5xx, network errors). Set to `0` to disable retries.                                 |
 | `retryBaseDelayMs` | `1000`                       | Base delay in milliseconds for exponential backoff between retries. Delay doubles on each attempt (1000ms, 2000ms, 4000ms, …). |
-| `ignore`           | `[]`                         | List of `group:artifact@version` coordinates to skip. Ignored dependencies are left at their original version and never sent to the API. See [Ignoring dependencies](#ignoring-dependencies). |
+| `ignore`           | `[]`                         | Patch versions to skip, as `group:artifact@patch-version`. The ignore list is sent to the API so the server returns the best available alternative patch. See [Ignoring dependencies](#ignoring-dependencies). |
 
 Example — extend the cache TTL and adjust retry behavior:
 
@@ -277,36 +277,44 @@ rootio {
 
 ### Ignoring dependencies
 
-You can tell the plugin to skip patching specific dependencies. Ignored coordinates are left at
-their original version and are never sent to the Root.io API.
+Use the ignore list to exclude specific Root.io patch versions. When you ignore a patch version, the plugin sends the ignore list to the API and the server returns the best available alternative — so you still get a patch, just not the one you excluded.
 
-An ignore entry is `group:artifact@version` (exact match, case-sensitive), e.g.
-`com.google.guava:guava@31.0-jre`.
+**Common use case:** a specific patch caused a regression. Ignore it to fall back to the previous patch version:
+
+```
+# commons-lang3: root.io.5 broke our build — fall back to root.io.4
+org.apache.commons:commons-lang3@3.12.0-root.io.5
+```
+
+The server will respond with `3.12.0-root.io.4` (or the next available patch) instead.
+
+An ignore entry is `group:artifact@patch-version` (exact match, case-sensitive).
 
 There are three ways to specify ignores; all are merged together:
 
-1. **`.rootioignore` file** in the root project directory — one entry per line. Blank lines and
-   lines starting with `#` are ignored:
+1. **`.rootioignore` file** in the root project directory — one entry per line. Blank lines and lines starting with `#` are ignored:
 
    ```
-   # Skip these — handled separately
-   com.google.guava:guava@31.0-jre
-   org.apache.commons:commons-lang3@3.12.0
+   # Fall back from a bad patch
+   org.apache.commons:commons-lang3@3.12.0-root.io.5
+   com.google.guava:guava@31.1-jre-root.io.2
    ```
 
 2. **`rootio { ignore = [...] }`** in your build script:
 
    ```kotlin
    rootio {
-       ignore = listOf("com.google.guava:guava@31.0-jre")
+       ignore = listOf("org.apache.commons:commons-lang3@3.12.0-root.io.5")
    }
    ```
 
 3. **`-Prootio.ignore`** Gradle property (comma-separated) for one-off invocations:
 
    ```bash
-   ./gradlew build -Prootio.ignore=com.google.guava:guava@31.0-jre,org.apache.commons:commons-lang3@3.12.0
+   ./gradlew build -Prootio.ignore=org.apache.commons:commons-lang3@3.12.0-root.io.5
    ```
+
+> **Note:** The ignore list is included in the local cache key. Changing the ignore list for a dependency automatically invalidates any cached result for that dependency.
 
 ## Local Development
 

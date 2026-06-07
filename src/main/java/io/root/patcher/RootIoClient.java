@@ -13,7 +13,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.IntToLongFunction;
@@ -137,12 +139,12 @@ public class RootIoClient {
         String groupArtifact = coords.substring(0, lastColon);
         String version = coords.substring(lastColon + 1);
 
-        Map<String, Object> bodyMap = new java.util.LinkedHashMap<>();
+        Map<String, Object> bodyMap = new LinkedHashMap<>();
         bodyMap.put(REQUEST_PACKAGES, List.of(Map.of(
                 REQUEST_PACKAGE_NAME, groupArtifact,
                 REQUEST_PACKAGE_VERSION, version)));
         if (ignoreEntries != null && !ignoreEntries.isEmpty()) {
-            List<Map<String, String>> ignoreList = new java.util.ArrayList<>();
+            List<Map<String, String>> ignoreList = new ArrayList<>();
             for (String entry : ignoreEntries) {
                 int at = entry.lastIndexOf('@');
                 if (at > 0 && at < entry.length() - 1) {
