@@ -15,6 +15,8 @@ import org.gradle.api.logging.Logging;
 import org.gradle.api.provider.Provider;
 import org.gradle.authentication.http.BasicAuthentication;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 
@@ -45,6 +47,13 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         // detector instead of co-existing on the classpath. See `RootIoCapabilityRule`.
         project.getDependencies().getComponents().all(RootIoCapabilityRule.class);
 
+        // IgnoreList must be built after the build script's rootio { } block is evaluated.
+        // We use a single-element array so the lambda can capture the reference set in afterEvaluate.
+        @SuppressWarnings("unchecked")
+        List<String>[] ignoreEntriesHolder = new List[]{List.of()};
+        project.afterEvaluate(p ->
+            ignoreEntriesHolder[0] = IgnoreList.load(p.getRootDir(), resolveIgnoreEntries(p, extension)).toApiEntries());
+
         project.getConfigurations().all(config -> {
             // Only hook resolvable configurations — non-resolvable ones (e.g. `api`, `implementation`)
             // are for declaring dependencies and do not support eachDependency. Their dependencies
@@ -55,7 +64,7 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             }
 
             config.getResolutionStrategy().eachDependency(details ->
-                    handleDependency(project, details, extension));
+                    handleDependency(project, details, extension, ignoreEntriesHolder[0]));
 
             // Capability conflict resolution. The common case — patched and upstream
             // sibling at different versions — is delegated to selectHighestVersion(), which
@@ -93,7 +102,7 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         });
     }
 
-    private static void handleDependency(Project project, DependencyResolveDetails details, RootIoExtension extension) {
+    private static void handleDependency(Project project, DependencyResolveDetails details, RootIoExtension extension, List<String> ignoreEntries) {
         ModuleVersionSelector req = details.getRequested();
         String version = req.getVersion();
 
@@ -107,14 +116,15 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
 
         String coords = req.getGroup() + ":" + req.getName() + ":" + version;
 
-        resolvePatchedDependency(project, details, coords, extension);
+        resolvePatchedDependency(project, details, coords, extension, ignoreEntries);
     }
 
     private static void resolvePatchedDependency(
             Project project,
             DependencyResolveDetails details,
             String coords,
-            RootIoExtension ext
+            RootIoExtension ext,
+            List<String> ignoreEntries
     ) {
         Provider<String> patchedProvider = project.getProviders().of(RootIoValueSource.class, spec -> {
             spec.getParameters().getCoords().set(coords);
@@ -124,6 +134,7 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             spec.getParameters().getTtlHours().set(ext.getTtlHours());
             spec.getParameters().getMaxRetries().set(ext.getMaxRetries());
             spec.getParameters().getRetryBaseDelayMs().set(ext.getRetryBaseDelayMs());
+            spec.getParameters().getIgnore().set(ignoreEntries);
         });
         // gets from cache if available or resolves from Root.io if not
         String patched = patchedProvider.getOrNull();
@@ -183,6 +194,21 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             return;
         }
         details.select(patched).because("Root.io security patch (same upstream version)");
+    }
+
+    // Merges the extension `ignore` list with the comma-separated `-Prootio.ignore` property.
+    private static List<String> resolveIgnoreEntries(Project project, RootIoExtension extension) {
+        List<String> entries = new ArrayList<>(extension.getIgnore().getOrElse(List.of()));
+        Object prop = project.findProperty("rootio.ignore");
+        if (prop != null) {
+            for (String part : Arrays.asList(prop.toString().split(","))) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    entries.add(trimmed);
+                }
+            }
+        }
+        return entries;
     }
 
     private static String envOrDefault(String name, String defaultValue) {

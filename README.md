@@ -263,6 +263,7 @@ All settings are optional beyond the API key. Configure them inside the `rootio 
 | `ttlHours`         | `24`                         | Hours to cache API responses locally. Set to `0` to disable caching.                                                           |
 | `maxRetries`       | `3`                          | Max retry attempts on transient failures (5xx, network errors). Set to `0` to disable retries.                                 |
 | `retryBaseDelayMs` | `1000`                       | Base delay in milliseconds for exponential backoff between retries. Delay doubles on each attempt (1000ms, 2000ms, 4000ms, …). |
+| `ignore`           | `[]`                         | List of `group:artifact@version` coordinates to skip. Ignored dependencies are left at their original version and never sent to the API. See [Ignoring dependencies](#ignoring-dependencies). |
 
 Example — extend the cache TTL and adjust retry behavior:
 
@@ -273,6 +274,39 @@ rootio {
     retryBaseDelayMs.set(500)
 }
 ```
+
+### Ignoring dependencies
+
+You can tell the plugin to skip patching specific dependencies. Ignored coordinates are left at
+their original version and are never sent to the Root.io API.
+
+An ignore entry is `group:artifact@version` (exact match, case-sensitive), e.g.
+`com.google.guava:guava@31.0-jre`.
+
+There are three ways to specify ignores; all are merged together:
+
+1. **`.rootioignore` file** in the root project directory — one entry per line. Blank lines and
+   lines starting with `#` are ignored:
+
+   ```
+   # Skip these — handled separately
+   com.google.guava:guava@31.0-jre
+   org.apache.commons:commons-lang3@3.12.0
+   ```
+
+2. **`rootio { ignore = [...] }`** in your build script:
+
+   ```kotlin
+   rootio {
+       ignore = listOf("com.google.guava:guava@31.0-jre")
+   }
+   ```
+
+3. **`-Prootio.ignore`** Gradle property (comma-separated) for one-off invocations:
+
+   ```bash
+   ./gradlew build -Prootio.ignore=com.google.guava:guava@31.0-jre,org.apache.commons:commons-lang3@3.12.0
+   ```
 
 ## Local Development
 

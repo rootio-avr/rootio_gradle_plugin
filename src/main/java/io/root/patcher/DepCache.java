@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -34,8 +35,8 @@ public class DepCache {
      * @param onMiss    called when the cache is cold or stale; may return null (no patch)
      * @return patched GAV string, or null if no patch exists
      */
-    public static String lookup(String coords, File rootDir, long ttlHours, Supplier<String> onMiss) {
-        File cacheFile = cacheFile(coords, rootDir);
+    public static String lookup(String coords, List<String> ignoreEntries, File rootDir, long ttlHours, Supplier<String> onMiss) {
+        File cacheFile = cacheFile(coords, ignoreEntries, rootDir);
 
         if (cacheFile.exists() && isWithinTtl(cacheFile, ttlHours)) {
             logger.debug("Using cached patch for {} from {}", coords, cacheFile);
@@ -55,11 +56,17 @@ public class DepCache {
         return ageMs < ttlHours * 3_600_000L;
     }
 
-    private static File cacheFile(String coords, File rootDir) {
+    private static File cacheFile(String coords, List<String> ignoreEntries, File rootDir) {
         File dir = new File(rootDir, CACHE_SUBDIR);
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
-        return new File(dir, sha1(coords) + ".json");
+        String cacheKey = coords;
+        if (ignoreEntries != null && !ignoreEntries.isEmpty()) {
+            List<String> sorted = new java.util.ArrayList<>(ignoreEntries);
+            java.util.Collections.sort(sorted);
+            cacheKey = coords + "|" + String.join(",", sorted);
+        }
+        return new File(dir, sha1(cacheKey) + ".json");
     }
 
     private static Map<String, String> readCache(File file) {

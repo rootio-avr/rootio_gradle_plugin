@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import java.util.zip.ZipOutputStream;
 
@@ -257,6 +258,47 @@ class RootIoPatcherPluginFunctionalTest {
             "Expected build to succeed when API key is resolved from .env file:\n" + result.getOutput());
     }
 
+    @ParameterizedTest(name = "Gradle {0}")
+    @MethodSource("gradleVersions")
+    void returnsAlternativePatchWhenPreferredPatchIsIgnored(String gradleVersion) throws IOException {
+        // The API receives the ignore list and returns an alternative patch
+        AtomicReference<String> capturedRequestBody = new AtomicReference<>();
+        server.createContext("/v3/analyze/maven", exchange -> {
+            capturedRequestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] bytes = patchResponseJson("io.test:my-lib", "1.0.0",
+                "io.root.io.test:my-lib", "1.0.0-root.io.4").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+
+        File repoDir = new File(projectDir, "local-repo");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0");
+        createFakeArtifact(repoDir, "io.root.io.test", "my-lib", "1.0.0-root.io.4");
+        Files.writeString(new File(projectDir, "settings.gradle.kts").toPath(),
+            "rootProject.name = \"test-project\"\n");
+        writeBuildGradleKtsWithIgnore(repoDir.toURI().toString(), "http://localhost:" + port,
+            "test-key", "io.test:my-lib@1.0.0-root.io.5");
+
+        BuildResult result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withGradleVersion(gradleVersion)
+            .withEnvironment(baseEnv())
+            .withArguments("dependencies", "--configuration", "compileClasspath")
+            .build();
+
+        // The API received the ignore list
+        assertNotNull(capturedRequestBody.get(), "Expected API to be called");
+        assertTrue(capturedRequestBody.get().contains("root.io.5"),
+            "Expected ignore entry in API request body:\n" + capturedRequestBody.get());
+
+        // The alternative patch (not the ignored one) was substituted
+        assertTrue(result.getOutput().contains("io.root.io.test:my-lib:1.0.0-root.io.4"),
+            "Expected alternative patch in output:\n" + result.getOutput());
+        assertFalse(result.getOutput().contains("1.0.0-root.io.5"),
+            "Expected ignored patch version NOT in output:\n" + result.getOutput());
+    }
+
     // --- Helpers ---
 
     private static final String BUILD_SCRIPT_TEMPLATE =
@@ -308,6 +350,31 @@ class RootIoPatcherPluginFunctionalTest {
         bindings.put("allowInsecureRepoLine", repoUri.startsWith("http://") ? "        isAllowInsecureProtocol = true\n" : "");
         bindings.put("rootioConfig", rootioConfig.toString());
         bindings.put("extraTasks", forceResolveTask);
+
+        try {
+            String content = new SimpleTemplateEngine()
+                .createTemplate(BUILD_SCRIPT_TEMPLATE)
+                .make(bindings)
+                .toString();
+            Files.writeString(new File(projectDir, "build.gradle.kts").toPath(), content);
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    // Like writeBuildGradleKts but adds an `ignore.set(listOf("..."))` line to the rootio block.
+    private void writeBuildGradleKtsWithIgnore(String repoUri, String apiUrl, String apiKey,
+            String ignoreEntry) throws IOException {
+        StringBuilder rootioConfig = new StringBuilder();
+        rootioConfig.append("    apiKey.set(\"").append(apiKey).append("\")\n");
+        rootioConfig.append("    apiUrl.set(\"").append(apiUrl).append("\")\n");
+        rootioConfig.append("    ignore.set(listOf(\"").append(ignoreEntry).append("\"))\n");
+
+        Map<String, Object> bindings = new HashMap<>();
+        bindings.put("repoUri", repoUri);
+        bindings.put("allowInsecureRepoLine", repoUri.startsWith("http://") ? "        isAllowInsecureProtocol = true\n" : "");
+        bindings.put("rootioConfig", rootioConfig.toString());
+        bindings.put("extraTasks", "");
 
         try {
             String content = new SimpleTemplateEngine()
