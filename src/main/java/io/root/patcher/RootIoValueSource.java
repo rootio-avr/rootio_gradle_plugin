@@ -1,11 +1,13 @@
 package io.root.patcher;
 
+import org.gradle.api.provider.ListProperty;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.ValueSource;
 import org.gradle.api.provider.ValueSourceParameters;
 
 import javax.annotation.Nullable;
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -32,20 +34,25 @@ public abstract class RootIoValueSource implements ValueSource<String, RootIoVal
         Property<Integer> getMaxRetries();
         /** @return base delay in milliseconds for exponential backoff */
         Property<Long> getRetryBaseDelayMs();
+        /** @return ignore entries as "group:artifact@version" strings sent to the API */
+        ListProperty<String> getIgnore();
     }
 
     @Override
     @Nullable
     public String obtain() {
         Parameters p = getParameters();
+        List<String> ignoreEntries = p.getIgnore().getOrElse(List.of());
         RootIoClient client = clientRef.updateAndGet(existing ->
             existing != null ? existing : new RootIoClient(p.getMaxRetries().get(), p.getRetryBaseDelayMs().get()));
         return DepCache.lookup(
             p.getCoords().get(),
+            ignoreEntries,
             new File(p.getRootDirPath().get()),
             p.getTtlHours().get(),
             () -> client.query(
                 p.getCoords().get(),
+                ignoreEntries,
                 p.getApiUrl().get(),
                 p.getApiKey().getOrNull()
             )

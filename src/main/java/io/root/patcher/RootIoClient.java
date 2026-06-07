@@ -13,7 +13,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.IntToLongFunction;
@@ -53,6 +55,7 @@ public class RootIoClient {
     private static final String REQUEST_PACKAGES = "packages";
     private static final String REQUEST_PACKAGE_NAME = "name";
     private static final String REQUEST_PACKAGE_VERSION = "version";
+    private static final String REQUEST_IGNORE = "ignore";
 
     private static final String RESPONSE_PATCHES = "patches";
     private static final String RESPONSE_PATCH_ALIAS = "patch_alias";
@@ -67,7 +70,7 @@ public class RootIoClient {
      * @return patched GAV string ("io.root.group:artifact:version"), or null if no patch
      * @throws GradleException after all retries are exhausted, or immediately on 4xx
      */
-    public String query(String coords, String apiUrl, String apiKey) {
+    public String query(String coords, List<String> ignoreEntries, String apiUrl, String apiKey) {
         String[] parts = coords.split(":", 3);
         if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
             logger.warn("Skipping malformed coords (expected group:artifact:version): {}", coords);
@@ -75,7 +78,7 @@ public class RootIoClient {
         }
 
         logger.debug("Querying Root.io API for {} at {}...", coords, apiUrl);
-        HttpRequest request = prepareHttpRequest(coords, apiUrl, apiKey);
+        HttpRequest request = prepareHttpRequest(coords, ignoreEntries, apiUrl, apiKey);
         Exception lastException = null;
 
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
@@ -130,17 +133,31 @@ public class RootIoClient {
         }
     }
 
-    private static HttpRequest prepareHttpRequest(String coords, String apiUrl, String apiKey) {
+    private static HttpRequest prepareHttpRequest(String coords, List<String> ignoreEntries, String apiUrl, String apiKey) {
         // Split "group:artifact:version" — last colon separates version
         int lastColon = coords.lastIndexOf(':');
         String groupArtifact = coords.substring(0, lastColon);
         String version = coords.substring(lastColon + 1);
 
-        String requestBody = JsonOutput.toJson(Map.of(
-                REQUEST_PACKAGES,
-                List.of(Map.of(
-                        REQUEST_PACKAGE_NAME, groupArtifact,
-                        REQUEST_PACKAGE_VERSION, version))));
+        Map<String, Object> bodyMap = new LinkedHashMap<>();
+        bodyMap.put(REQUEST_PACKAGES, List.of(Map.of(
+                REQUEST_PACKAGE_NAME, groupArtifact,
+                REQUEST_PACKAGE_VERSION, version)));
+        if (ignoreEntries != null && !ignoreEntries.isEmpty()) {
+            List<Map<String, String>> ignoreList = new ArrayList<>();
+            for (String entry : ignoreEntries) {
+                int at = entry.lastIndexOf('@');
+                if (at > 0 && at < entry.length() - 1) {
+                    ignoreList.add(Map.of(
+                            REQUEST_PACKAGE_NAME, entry.substring(0, at),
+                            REQUEST_PACKAGE_VERSION, entry.substring(at + 1)));
+                }
+            }
+            if (!ignoreList.isEmpty()) {
+                bodyMap.put(REQUEST_IGNORE, ignoreList);
+            }
+        }
+        String requestBody = JsonOutput.toJson(bodyMap);
         String endpoint = apiUrl.replaceAll("/$", "") + ENDPOINT_ANALYZE_MAVEN;
 
         HttpRequest.Builder builder = HttpRequest.newBuilder()

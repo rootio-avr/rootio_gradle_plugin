@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import groovy.json.JsonOutput;
+import groovy.json.JsonSlurper;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -52,7 +53,7 @@ class RootIoClientTest {
     void returnsNullWhenNoPatchAvailable() {
         respondWith(200, JsonOutput.toJson(Map.of("patches", List.of(), "skipped", List.of())));
 
-        String result = noRetryClient().query("org.example:foo:1.0", "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key");
 
         assertNull(result);
     }
@@ -68,7 +69,7 @@ class RootIoClientTest {
                 "cve_ids", List.of())),
             "skipped", List.of())));
 
-        String result = noRetryClient().query("org.example:foo:1.0", "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key");
 
         assertEquals("io.root.org.example:foo:1.0-patched", result);
     }
@@ -78,7 +79,7 @@ class RootIoClientTest {
         respondWith(500, "");
 
         assertThrows(GradleException.class, () ->
-            noRetryClient().query("org.example:foo:1.0", "http://localhost:" + port, "test-key"));
+            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key"));
     }
 
     @Test
@@ -86,14 +87,14 @@ class RootIoClientTest {
         respondWith(401, "");
 
         assertThrows(GradleException.class, () ->
-            noRetryClient().query("org.example:foo:1.0", "http://localhost:" + port, "test-key"));
+            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key"));
     }
 
     @Test
     void throwsGradleExceptionOnConnectionFailure() {
         // Port 1 has no server — connection will be refused
         assertThrows(GradleException.class, () ->
-            noRetryClient().query("org.example:foo:1.0", "http://localhost:1", "test-key"));
+            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:1", "test-key"));
     }
 
     @Test
@@ -120,7 +121,7 @@ class RootIoClientTest {
             }
         });
 
-        String result = retryClient(3).query("org.example:foo:1.0", "http://localhost:" + port, "test-key");
+        String result = retryClient(3).query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key");
 
         assertEquals("io.root.org.example:foo:1.0-patched", result);
         assertEquals(3, callCount.get());
@@ -136,7 +137,7 @@ class RootIoClientTest {
         });
 
         assertThrows(GradleException.class, () ->
-            retryClient(3).query("org.example:foo:1.0", "http://localhost:" + port, "test-key"));
+            retryClient(3).query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key"));
 
         assertEquals(1, callCount.get());
     }
@@ -152,7 +153,7 @@ class RootIoClientTest {
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         });
 
-        noRetryClient().query("org.example:foo:1.0", "http://localhost:" + port, TEST_API_KEY);
+        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, TEST_API_KEY);
 
         String expected = "Basic " + Base64.getEncoder().encodeToString((TEST_API_KEY + ":").getBytes(StandardCharsets.UTF_8));
         assertEquals(expected, capturedAuth.get());
@@ -168,7 +169,7 @@ class RootIoClientTest {
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         });
 
-        noRetryClient().query("org.example:foo:1.0", "http://localhost:" + port, null);
+        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, null);
 
         assertNull(capturedAuth.get());
     }
@@ -183,7 +184,7 @@ class RootIoClientTest {
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         });
 
-        noRetryClient().query("org.example:foo:1.0", "http://localhost:" + port, "");
+        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "");
 
         assertNull(capturedAuth.get());
     }
@@ -197,7 +198,7 @@ class RootIoClientTest {
             exchange.getResponseBody().close();
         });
 
-        String result = noRetryClient().query(":artifact:1.0", "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query(":artifact:1.0", List.of(), "http://localhost:" + port, "test-key");
 
         assertNull(result);
         assertEquals(0, callCount.get());
@@ -212,7 +213,7 @@ class RootIoClientTest {
             exchange.getResponseBody().close();
         });
 
-        String result = noRetryClient().query("org.example::1.0", "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example::1.0", List.of(), "http://localhost:" + port, "test-key");
 
         assertNull(result);
         assertEquals(0, callCount.get());
@@ -227,10 +228,59 @@ class RootIoClientTest {
             exchange.getResponseBody().close();
         });
 
-        String result = noRetryClient().query("org.example:artifact:", "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example:artifact:", List.of(), "http://localhost:" + port, "test-key");
 
         assertNull(result);
         assertEquals(0, callCount.get());
+    }
+
+    @Test
+    void sendsIgnoreListInRequestBody() throws Exception {
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        server.createContext("/v3/analyze/maven", exchange -> {
+            capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] bytes = JsonOutput.toJson(Map.of("patches", List.of())).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+
+        noRetryClient().query(
+            "org.example:foo:1.0",
+            List.of("org.example:foo@1.0-root.io.5"),
+            "http://localhost:" + port,
+            "test-key"
+        );
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) new JsonSlurper().parseText(capturedBody.get());
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> ignore = (List<Map<String, String>>) body.get("ignore");
+        assertNotNull(ignore, "Expected 'ignore' field in request body");
+        assertEquals(1, ignore.size());
+        assertEquals("org.example:foo", ignore.get(0).get("name"));
+        assertEquals("1.0-root.io.5", ignore.get(0).get("version"));
+    }
+
+    @Test
+    void omitsIgnoreFieldWhenListIsEmpty() throws Exception {
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        server.createContext("/v3/analyze/maven", exchange -> {
+            capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] bytes = JsonOutput.toJson(Map.of("patches", List.of())).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+
+        noRetryClient().query(
+            "org.example:foo:1.0",
+            List.of(),
+            "http://localhost:" + port,
+            "test-key"
+        );
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) new JsonSlurper().parseText(capturedBody.get());
+        assertFalse(body.containsKey("ignore"), "Expected no 'ignore' field when list is empty");
     }
 
     private void respondWith(int status, String body) {

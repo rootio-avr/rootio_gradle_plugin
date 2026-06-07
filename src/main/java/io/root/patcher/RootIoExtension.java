@@ -1,5 +1,6 @@
 package io.root.patcher;
 
+import org.gradle.api.provider.ListProperty;
 import org.gradle.api.provider.Property;
 
 /** Gradle extension that exposes {@code rootio { }} configuration block. */
@@ -59,4 +60,11 @@ public abstract class RootIoExtension {
      * @return the property
      */
     public abstract Property<Boolean> getAllowInsecurePkgRepo();
+
+    /**
+     * Coordinates to skip patching, each as {@code group:artifact@version}.
+     * Merged with the {@code .rootioignore} file and {@code -Prootio.ignore}.
+     * @return the property
+     */
+    public abstract ListProperty<String> getIgnore();
 }
