@@ -304,7 +304,7 @@ There are three ways to specify ignores; all are merged together:
 
    ```kotlin
    rootio {
-       ignore = listOf("org.apache.commons:commons-lang3@3.12.0-root.io.5")
+       ignore = ["org.apache.commons:commons-lang3@3.12.0-root.io.5"]
    }
    ```
 
