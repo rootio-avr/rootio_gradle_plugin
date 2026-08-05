@@ -89,8 +89,7 @@ class RootIoPatcherPluginFunctionalTest {
             .withArguments("dependencies", "--configuration", "compileClasspath")
             .build();
 
-        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4")
-                || result.getOutput().contains("io.test:my-lib:1.0.0-root.io.4"),
+        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected patched coordinates in output:\n" + result.getOutput());
     }
 
@@ -209,8 +208,7 @@ class RootIoPatcherPluginFunctionalTest {
             .withArguments("--configuration-cache", "dependencies", "--configuration", "compileClasspath")
             .build();
 
-        assertTrue(first.getOutput().contains("io.test:my-lib:1.0.0-root.io.4")
-                || first.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
+        assertTrue(first.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected patched coordinates in first build output:\n" + first.getOutput());
 
         // Second build: must reuse the stored configuration cache
@@ -226,8 +224,7 @@ class RootIoPatcherPluginFunctionalTest {
             second.getOutput().contains("Configuration cache entry reused") ||
             second.getOutput().contains("Reusing configuration cache"),
             "Expected second build to reuse configuration cache:\n" + second.getOutput());
-        assertTrue(second.getOutput().contains("io.test:my-lib:1.0.0-root.io.4")
-                || second.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
+        assertTrue(second.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected patched coordinates in second build output:\n" + second.getOutput());
     }
 
@@ -294,7 +291,7 @@ class RootIoPatcherPluginFunctionalTest {
             "Expected ignore entry in API request body:\n" + capturedRequestBody.get());
 
         // The alternative patch (not the ignored one) was substituted
-        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0-root.io.4"),
+        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected alternative patch in output:\n" + result.getOutput());
         assertFalse(result.getOutput().contains("1.0.0-root.io.5"),
             "Expected ignored patch version NOT in output:\n" + result.getOutput());
