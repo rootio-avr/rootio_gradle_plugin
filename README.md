@@ -25,7 +25,7 @@ You declare:
 implementation("io.netty:netty-handler:4.1.118.Final")
 ```
 
-If Root.io has a patch for that version, Gradle resolves a secure drop-in replacement instead — at the same coordinates but sourced from the Root.io registry — without any change to your build file.
+If Root.io has a patch for that version, Gradle resolves a secure drop-in replacement instead — `io.netty:netty-handler:4.1.118.Final-root.io.1`, sourced from the Root.io registry — without any change to your build file. The `groupId` and `artifactId` are untouched; only the version carries the `-root.io.N` marker. (Patches can also be published under a separate `io.root.*` namespace — see [Aliased vs non-aliased coordinates](#aliased-vs-non-aliased-coordinates).)
 
 ## Requirements
 
@@ -263,7 +263,7 @@ All settings are optional beyond the API key. Configure them inside the `rootio 
 | `ttlHours`         | `24`                         | Hours to cache API responses locally. Set to `0` to disable caching.                                                           |
 | `maxRetries`       | `3`                          | Max retry attempts on transient failures (5xx, network errors). Set to `0` to disable retries.                                 |
 | `retryBaseDelayMs` | `1000`                       | Base delay in milliseconds for exponential backoff between retries. Delay doubles on each attempt (1000ms, 2000ms, 4000ms, …). |
-| `useAlias`         | `true`                       | Use the Root.io aliased coordinate for patches. Set to `false` to keep the upstream `groupId` and only bump the version. Also settable via `ROOTIO_USE_ALIAS=false`. See [Aliased vs non-aliased coordinates](#aliased-vs-non-aliased-coordinates). |
+| `useAlias`         | `false`                      | Use the Root.io aliased coordinate (`io.root.<group>:<artifact>`) for patches. By default the patch keeps the upstream `groupId` and only bumps the version. Also settable via `ROOTIO_USE_ALIAS=true`. See [Aliased vs non-aliased coordinates](#aliased-vs-non-aliased-coordinates). |
 | `ignore`           | `[]`                         | Patch versions to skip, as `group:artifact@patch-version`. The ignore list is sent to the API so the server returns the best available alternative patch. See [Ignoring dependencies](#ignoring-dependencies). |
 
 Example — extend the cache TTL and adjust retry behavior:
@@ -282,16 +282,16 @@ The Root.io API returns each patch under two coordinates, and `useAlias` picks w
 
 | Mode | Patched coordinate for `org.apache.commons:commons-lang3:3.12.0` |
 |------|------------------------------------------------------------------|
-| `useAlias = true` (default) | `io.root.org.apache.commons:commons-lang3:3.12.0-root.io.5` |
-| `useAlias = false`          | `org.apache.commons:commons-lang3:3.12.0-root.io.5` |
+| `useAlias = false` (default) | `org.apache.commons:commons-lang3:3.12.0-root.io.5` |
+| `useAlias = true`            | `io.root.org.apache.commons:commons-lang3:3.12.0-root.io.5` |
 
-Aliasing keeps patched artifacts in a separate namespace, which makes them unambiguous in a lockfile or SBOM. The cost is that the patched jar is a *different module* from the upstream one as far as Gradle is concerned, so both could land on the classpath at once. The plugin prevents that by injecting the upstream capability onto patched components and resolving the resulting conflict.
+By default the patched jar keeps the upstream `group:artifact` and only the version changes, so it is the *same Gradle module* as the dependency it replaces. Gradle's ordinary version conflict resolution then dedups it, and the version comparator ranks `3.12.0-root.io.5` above bare `3.12.0` — so the patch wins with no extra machinery.
 
-With `useAlias = false` the patched jar keeps the upstream `group:artifact`, so Gradle's ordinary version conflict resolution dedups it and the capability machinery never fires. Gradle's version comparator also ranks `3.12.0-root.io.5` above bare `3.12.0`, so the patch wins.
+Aliasing puts patched artifacts in a separate `io.root.*` namespace, which makes them unambiguous in a lockfile or SBOM. The cost is that the patched jar becomes a different module from the upstream one, so both could land on the classpath at once. The plugin prevents that by injecting the upstream capability onto patched components and resolving the resulting conflict — machinery that only exists to serve this mode.
 
 ```kotlin
 rootio {
-    useAlias.set(false)
+    useAlias.set(true)
 }
 ```
 

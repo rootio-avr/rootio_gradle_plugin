@@ -45,7 +45,7 @@ public abstract class RootIoValueSource implements ValueSource<String, RootIoVal
     public String obtain() {
         Parameters p = getParameters();
         List<String> ignoreEntries = p.getIgnore().getOrElse(List.of());
-        boolean useAlias = p.getUseAlias().getOrElse(true);
+        boolean useAlias = p.getUseAlias().getOrElse(false);
         RootIoClient client = clientRef.updateAndGet(existing ->
             existing != null ? existing : new RootIoClient(p.getMaxRetries().get(), p.getRetryBaseDelayMs().get()));
         return DepCache.lookup(

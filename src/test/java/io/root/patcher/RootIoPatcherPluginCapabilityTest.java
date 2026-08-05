@@ -65,6 +65,9 @@ class RootIoPatcherPluginCapabilityTest {
 
     private Map<String, String> baseEnv() {
         Map<String, String> env = new HashMap<>(System.getenv());
+        // Every scenario here is about the aliased coord splitting one module into two, which is
+        // the only case where capabilities come into play — so opt in explicitly.
+        env.put("ROOTIO_USE_ALIAS", "true");
         String javaHome = System.getProperty("test.javaHome");
         if (javaHome != null && !javaHome.isBlank()) {
             env.put("JAVA_HOME", javaHome);

@@ -70,7 +70,9 @@ public class DepCache {
             Collections.sort(sorted);
             cacheKey = coords + "|" + String.join(",", sorted);
         }
-        // Only the non-default (non-aliased) mode gets a key suffix, so existing caches stay warm.
+        // The suffix goes on the non-aliased mode specifically: the unsuffixed key already holds
+        // aliased coords written by plugin versions that predate this flag, and serving one of
+        // those to a non-aliased build would substitute the wrong groupId.
         if (!useAlias) {
             cacheKey = cacheKey + "|noalias";
         }

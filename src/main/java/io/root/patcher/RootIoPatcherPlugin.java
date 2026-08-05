@@ -35,22 +35,23 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         extension.getMaxRetries().convention(3);
         extension.getRetryBaseDelayMs().convention(1000L);
         extension.getAllowInsecurePkgRepo().convention(false);
-        extension.getUseAlias().convention(!"false".equalsIgnoreCase(System.getenv("ROOTIO_USE_ALIAS")));
+        extension.getUseAlias().convention("true".equalsIgnoreCase(System.getenv("ROOTIO_USE_ALIAS")));
         // apiKey resolved automatically from .env, systemProp, or env var
         // it will throw an exception if not set later on in afterEvaluate
         apiKeyResolver.resolve(project.getRootDir()).ifPresent(key -> extension.getApiKey().convention(key));
 
         project.afterEvaluate(p -> registerRootMavenRepo(p, extension));
 
-        // Capability injection — when Gradle resolves metadata for a Root.io-patched coord
-        // (io.root.<G>:<A>:<V>-root.io.N), declare the secondary capability (G, A, V) so
-        // unpatched siblings in the same graph trigger Gradle's capability conflict
-        // detector instead of co-existing on the classpath. See `RootIoCapabilityRule`.
+        // Capability injection — only relevant under the opt-in `useAlias = true`, where the
+        // patched coord (io.root.<G>:<A>:<V>-root.io.N) is a different Gradle module from its
+        // upstream sibling and both could land on the classpath at once. The rule declares the
+        // secondary capability (G, A, V) so the conflict detector fires instead.
+        // See `RootIoCapabilityRule`.
         //
-        // Registered unconditionally: under `useAlias = false` the patched coord keeps the
-        // upstream group, so no io.root.* component ever reaches the rule and it self-skips.
-        // Not worth gating on the flag. Deduping in that mode is Gradle's ordinary version
-        // conflict resolution, which ranks "1.2.3-root.io.1" above bare "1.2.3" for free.
+        // Registered unconditionally: by default the patched coord keeps the upstream group, so
+        // no io.root.* component reaches the rule and it self-skips. Deduping in the default
+        // path is Gradle's ordinary version conflict resolution, which ranks "1.2.3-root.io.1"
+        // above bare "1.2.3" for free.
         project.getDependencies().getComponents().all(RootIoCapabilityRule.class);
 
         // IgnoreList must be built after the build script's rootio { } block is evaluated.
