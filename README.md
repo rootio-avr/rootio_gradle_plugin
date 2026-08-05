@@ -263,6 +263,7 @@ All settings are optional beyond the API key. Configure them inside the `rootio 
 | `ttlHours`         | `24`                         | Hours to cache API responses locally. Set to `0` to disable caching.                                                           |
 | `maxRetries`       | `3`                          | Max retry attempts on transient failures (5xx, network errors). Set to `0` to disable retries.                                 |
 | `retryBaseDelayMs` | `1000`                       | Base delay in milliseconds for exponential backoff between retries. Delay doubles on each attempt (1000ms, 2000ms, 4000ms, …). |
+| `useAlias`         | `true`                       | Use the Root.io aliased coordinate for patches. Set to `false` to keep the upstream `groupId` and only bump the version. Also settable via `ROOTIO_USE_ALIAS=false`. See [Aliased vs non-aliased coordinates](#aliased-vs-non-aliased-coordinates). |
 | `ignore`           | `[]`                         | Patch versions to skip, as `group:artifact@patch-version`. The ignore list is sent to the API so the server returns the best available alternative patch. See [Ignoring dependencies](#ignoring-dependencies). |
 
 Example — extend the cache TTL and adjust retry behavior:
@@ -274,6 +275,29 @@ rootio {
     retryBaseDelayMs.set(500)
 }
 ```
+
+### Aliased vs non-aliased coordinates
+
+The Root.io API returns each patch under two coordinates, and `useAlias` picks which one the plugin substitutes in:
+
+| Mode | Patched coordinate for `org.apache.commons:commons-lang3:3.12.0` |
+|------|------------------------------------------------------------------|
+| `useAlias = true` (default) | `io.root.org.apache.commons:commons-lang3:3.12.0-root.io.5` |
+| `useAlias = false`          | `org.apache.commons:commons-lang3:3.12.0-root.io.5` |
+
+Aliasing keeps patched artifacts in a separate namespace, which makes them unambiguous in a lockfile or SBOM. The cost is that the patched jar is a *different module* from the upstream one as far as Gradle is concerned, so both could land on the classpath at once. The plugin prevents that by injecting the upstream capability onto patched components and resolving the resulting conflict.
+
+With `useAlias = false` the patched jar keeps the upstream `group:artifact`, so Gradle's ordinary version conflict resolution dedups it and the capability machinery never fires. Gradle's version comparator also ranks `3.12.0-root.io.5` above bare `3.12.0`, so the patch wins.
+
+```kotlin
+rootio {
+    useAlias.set(false)
+}
+```
+
+Either way the patched artifact resolves from the same `pkg.root.io/maven` repository, which the plugin registers automatically.
+
+> **Note:** `useAlias` is part of the local cache key, so flipping it does not serve a stale coordinate from a previous build.
 
 ### Ignoring dependencies
 

@@ -18,7 +18,7 @@ class DepCacheTest {
     void cacheMissCallsOnMissAndWritesResult() {
         AtomicInteger callCount = new AtomicInteger(0);
 
-        String result = DepCache.lookup("org.example:foo:1.0", List.of(), tempDir, 24, () -> {
+        String result = DepCache.lookup("org.example:foo:1.0", List.of(), tempDir, 24, true, () -> {
             callCount.incrementAndGet();
             return "io.root.org.example:foo:1.0-patched";
         });
@@ -30,10 +30,10 @@ class DepCacheTest {
     @Test
     void cacheHitSkipsOnMiss() {
         // Warm the cache
-        DepCache.lookup("org.example:bar:2.0", List.of(), tempDir, 24, () -> "io.root.org.example:bar:2.0-patched");
+        DepCache.lookup("org.example:bar:2.0", List.of(), tempDir, 24, true, () -> "io.root.org.example:bar:2.0-patched");
 
         AtomicInteger callCount = new AtomicInteger(0);
-        String result = DepCache.lookup("org.example:bar:2.0", List.of(), tempDir, 24, () -> {
+        String result = DepCache.lookup("org.example:bar:2.0", List.of(), tempDir, 24, true, () -> {
             callCount.incrementAndGet();
             return "should-not-be-called";
         });
@@ -45,7 +45,7 @@ class DepCacheTest {
     @Test
     void expiredTtlCallsOnMissAgain() {
         // Warm the cache
-        DepCache.lookup("org.example:baz:3.0", List.of(), tempDir, 24, () -> "io.root.org.example:baz:3.0-patched");
+        DepCache.lookup("org.example:baz:3.0", List.of(), tempDir, 24, true, () -> "io.root.org.example:baz:3.0-patched");
 
         // Backdate the cache file past the TTL
         File cacheDir = new File(tempDir, ".gradle/rootio-cache");
@@ -55,7 +55,7 @@ class DepCacheTest {
         assertTrue(files[0].setLastModified(System.currentTimeMillis() - 25 * 3_600_000L));
 
         AtomicInteger callCount = new AtomicInteger(0);
-        DepCache.lookup("org.example:baz:3.0", List.of(), tempDir, 24, () -> {
+        DepCache.lookup("org.example:baz:3.0", List.of(), tempDir, 24, true, () -> {
             callCount.incrementAndGet();
             return "refreshed";
         });
@@ -66,10 +66,10 @@ class DepCacheTest {
     @Test
     void nullResultIsCachedAndNotRefetched() {
         // Cache a null (no patch for this dep)
-        DepCache.lookup("org.example:qux:4.0", List.of(), tempDir, 24, () -> null);
+        DepCache.lookup("org.example:qux:4.0", List.of(), tempDir, 24, true, () -> null);
 
         AtomicInteger callCount = new AtomicInteger(0);
-        String result = DepCache.lookup("org.example:qux:4.0", List.of(), tempDir, 24, () -> {
+        String result = DepCache.lookup("org.example:qux:4.0", List.of(), tempDir, 24, true, () -> {
             callCount.incrementAndGet();
             return "should-not-be-called";
         });
@@ -83,11 +83,11 @@ class DepCacheTest {
         AtomicInteger callCount = new AtomicInteger(0);
 
         String result1 = DepCache.lookup(
-            "org.example:foo:1.0", List.of(), rootDir, 24,
+            "org.example:foo:1.0", List.of(), rootDir, 24, true,
             () -> { callCount.incrementAndGet(); return "patched-no-ignore"; });
 
         String result2 = DepCache.lookup(
-            "org.example:foo:1.0", List.of("org.example:foo@1.0-root.io.5"), rootDir, 24,
+            "org.example:foo:1.0", List.of("org.example:foo@1.0-root.io.5"), rootDir, 24, true,
             () -> { callCount.incrementAndGet(); return "patched-with-ignore"; });
 
         assertEquals("patched-no-ignore", result1);
@@ -96,13 +96,24 @@ class DepCacheTest {
     }
 
     @Test
+    void differentUseAliasProducesDifferentCacheEntry(@TempDir File rootDir) {
+        String aliased = DepCache.lookup("org.example:foo:1.0", List.of(), rootDir, 24, true,
+            () -> "io.root.org.example:foo:1.0-root.io.1");
+        String upstream = DepCache.lookup("org.example:foo:1.0", List.of(), rootDir, 24, false,
+            () -> "org.example:foo:1.0-root.io.1");
+
+        assertEquals("io.root.org.example:foo:1.0-root.io.1", aliased);
+        assertEquals("org.example:foo:1.0-root.io.1", upstream);
+    }
+
+    @Test
     void sameIgnoreListHitsCacheOnSecondCall(@TempDir File rootDir) {
         AtomicInteger callCount = new AtomicInteger(0);
         List<String> ignoreEntries = List.of("org.example:foo@1.0-root.io.5");
 
-        DepCache.lookup("org.example:foo:1.0", ignoreEntries, rootDir, 24,
+        DepCache.lookup("org.example:foo:1.0", ignoreEntries, rootDir, 24, true,
             () -> { callCount.incrementAndGet(); return "patched"; });
-        DepCache.lookup("org.example:foo:1.0", ignoreEntries, rootDir, 24,
+        DepCache.lookup("org.example:foo:1.0", ignoreEntries, rootDir, 24, true,
             () -> { callCount.incrementAndGet(); return "patched"; });
 
         assertEquals(1, callCount.get(), "Expected cache hit on second call with same ignore list");

@@ -34,11 +34,13 @@ public class DepCache {
      * @param coords    Maven GAV string — "group:artifact:version"
      * @param rootDir   project root directory (always use {@code project.getRootDir()})
      * @param ttlHours  cache TTL in hours
+     * @param useAlias  whether the cached coord is the aliased one; part of the cache key so
+     *                  flipping {@code rootio { useAlias }} does not serve a stale coord
      * @param onMiss    called when the cache is cold or stale; may return null (no patch)
      * @return patched GAV string, or null if no patch exists
      */
-    public static String lookup(String coords, List<String> ignoreEntries, File rootDir, long ttlHours, Supplier<String> onMiss) {
-        File cacheFile = cacheFile(coords, ignoreEntries, rootDir);
+    public static String lookup(String coords, List<String> ignoreEntries, File rootDir, long ttlHours, boolean useAlias, Supplier<String> onMiss) {
+        File cacheFile = cacheFile(coords, ignoreEntries, useAlias, rootDir);
 
         if (cacheFile.exists() && isWithinTtl(cacheFile, ttlHours)) {
             logger.debug("Using cached patch for {} from {}", coords, cacheFile);
@@ -58,7 +60,7 @@ public class DepCache {
         return ageMs < ttlHours * 3_600_000L;
     }
 
-    private static File cacheFile(String coords, List<String> ignoreEntries, File rootDir) {
+    private static File cacheFile(String coords, List<String> ignoreEntries, boolean useAlias, File rootDir) {
         File dir = new File(rootDir, CACHE_SUBDIR);
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
@@ -67,6 +69,10 @@ public class DepCache {
             List<String> sorted = new ArrayList<>(ignoreEntries);
             Collections.sort(sorted);
             cacheKey = coords + "|" + String.join(",", sorted);
+        }
+        // Only the non-default (non-aliased) mode gets a key suffix, so existing caches stay warm.
+        if (!useAlias) {
+            cacheKey = cacheKey + "|noalias";
         }
         return new File(dir, sha1(cacheKey) + ".json");
     }
