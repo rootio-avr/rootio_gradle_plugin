@@ -62,16 +62,12 @@ class RootIoPatcherPluginFunctionalTest {
     }
 
     /**
-     * Base environment for all GradleRunner calls. When test.javaHome is set, it overrides
+     * Environment for all GradleRunner calls. When test.javaHome is set, it overrides
      * JAVA_HOME so TestKit daemons use a different JDK than the one running the tests
      * (e.g. JDK 11 daemons driven by a JDK 17 Gradle wrapper in CI).
      */
-    private Map<String, String> baseEnv() {
+    private Map<String, String> env() {
         Map<String, String> env = new HashMap<>(System.getenv());
-        // These scenarios assert on aliased coords (io.root.io.test:*), and their stub responses
-        // carry only patch_alias, so they opt into aliasing. The default (non-aliased) path is
-        // covered by substitutesUpstreamGroupCoordByDefault below.
-        env.put("ROOTIO_USE_ALIAS", "true");
         String javaHome = System.getProperty("test.javaHome");
         if (javaHome != null && !javaHome.isBlank()) {
             env.put("JAVA_HOME", javaHome);
@@ -79,60 +75,22 @@ class RootIoPatcherPluginFunctionalTest {
         return env;
     }
 
-    /** baseEnv() minus the aliasing opt-in, exercising the plugin's default coord selection. */
-    private Map<String, String> defaultEnv() {
-        Map<String, String> env = baseEnv();
-        env.remove("ROOTIO_USE_ALIAS");
-        return env;
-    }
-
-    @ParameterizedTest(name = "Gradle {0}")
-    @MethodSource("gradleVersions")
-    void substitutesUpstreamGroupCoordByDefault(String gradleVersion) throws IOException {
-        setupServerResponse(200, patchResponseJson(
-            "io.test:my-lib", "1.0.0", "io.root.io.test:my-lib", "1.0.0-root.io.4",
-            "io.test:my-lib", "1.0.0-root.io.4"));
-
-        File repoDir = new File(projectDir, "local-repo");
-        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0");
-        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0-root.io.4");
-        Files.writeString(new File(projectDir, "settings.gradle.kts").toPath(),
-            "rootProject.name = \"test-project\"\n");
-        writeBuildGradleKts(repoDir.toURI().toString(), "http://localhost:" + port, null, null, false);
-
-        BuildResult result = GradleRunner.create()
-            .withProjectDir(projectDir)
-            .withPluginClasspath()
-            .withGradleVersion(gradleVersion)
-            .withEnvironment(defaultEnv())
-            .withArguments("dependencies", "--configuration", "compileClasspath")
-            .build();
-
-        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4")
-                || result.getOutput().contains("io.test:my-lib:1.0.0-root.io.4"),
-            "Expected upstream-group patched coords in output:\n" + result.getOutput());
-        assertFalse(result.getOutput().contains("io.root.io.test"),
-            "Expected no aliased coords when useAlias defaults to false:\n" + result.getOutput());
-    }
-
     @ParameterizedTest(name = "Gradle {0}")
     @MethodSource("gradleVersions")
     void substitutesDepWhenPatchAvailable(String gradleVersion) throws IOException {
-        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.root.io.test:my-lib", "1.0.0-patched"));
+        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.test:my-lib", "1.0.0-root.io.4"));
         writeProjectFiles();
 
         BuildResult result = GradleRunner.create()
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("dependencies", "--configuration", "compileClasspath")
             .build();
 
-        assertTrue(result.getOutput().contains("io.root.io.test:my-lib:1.0.0-patched"),
+        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected patched coordinates in output:\n" + result.getOutput());
-        assertFalse(result.getOutput().contains("io.test:my-lib:1.0.0\n"),
-            "Expected original dependency to be substituted, not resolved as-is:\n" + result.getOutput());
     }
 
     @ParameterizedTest(name = "Gradle {0}")
@@ -145,27 +103,27 @@ class RootIoPatcherPluginFunctionalTest {
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("dependencies", "--configuration", "compileClasspath")
             .build();
 
         assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0"),
             "Expected original coordinates in output:\n" + result.getOutput());
-        assertFalse(result.getOutput().contains("io.root.io.test"),
+        assertFalse(result.getOutput().contains("root.io"),
             "Expected no substitution in output:\n" + result.getOutput());
     }
 
     @ParameterizedTest(name = "Gradle {0}")
     @MethodSource("gradleVersions")
     void reasonStringAppearsInDependencyInsight(String gradleVersion) throws IOException {
-        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.root.io.test:my-lib", "1.0.0-patched"));
+        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.test:my-lib", "1.0.0-root.io.4"));
         writeProjectFiles();
 
         BuildResult result = GradleRunner.create()
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("dependencyInsight", "--dependency", "io.test:my-lib",
                 "--configuration", "compileClasspath")
             .build();
@@ -184,7 +142,7 @@ class RootIoPatcherPluginFunctionalTest {
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("forceResolve")
             .buildAndFail();
 
@@ -197,12 +155,12 @@ class RootIoPatcherPluginFunctionalTest {
     void resolvesFromAutoRegisteredPkgRepo(String gradleVersion) throws IOException {
         // The plugin must auto-register {pkgUrl}/maven so patched artifacts resolve
         // without the user needing to add the repository manually.
-        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.root.io.test:my-lib", "1.0.0-patched"));
+        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.test:my-lib", "1.0.0-root.io.4"));
 
         File repoDir = new File(projectDir, "local-repo");
         File pkgRepoDir = new File(projectDir, "pkg-repo");
         createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0");
-        createFakeArtifact(pkgRepoDir, "io.root.io.test", "my-lib", "1.0.0-patched");
+        createFakeArtifact(pkgRepoDir, "io.test", "my-lib", "1.0.0-root.io.4");
 
         // Both repos served over HTTP so we can assert exactly which one served each artifact.
         try (FileServingRepo originalRepo = new FileServingRepo(repoDir);
@@ -215,7 +173,7 @@ class RootIoPatcherPluginFunctionalTest {
 
             // Use a per-test Gradle user home so the module cache is fresh and Gradle
             // must contact our HTTP servers rather than using a cross-test cached artifact.
-            Map<String, String> env = baseEnv();
+            Map<String, String> env = env();
             env.put("GRADLE_USER_HOME", new File(projectDir, ".gradle-home").getAbsolutePath());
 
             BuildResult result = GradleRunner.create()
@@ -228,9 +186,9 @@ class RootIoPatcherPluginFunctionalTest {
 
             assertTrue(result.getOutput().contains("BUILD SUCCESSFUL"),
                 "Expected patched artifact to resolve from auto-registered pkg repo:\n" + result.getOutput());
-            assertTrue(pkgRepo.served("io.root.io.test"),
+            assertTrue(pkgRepo.served("1.0.0-root.io.4"),
                 "Expected pkg repo to serve the patched artifact");
-            assertFalse(originalRepo.served("io.root.io.test"),
+            assertFalse(originalRepo.served("1.0.0-root.io.4"),
                 "Expected original repo NOT to serve the patched artifact");
         }
     }
@@ -238,7 +196,7 @@ class RootIoPatcherPluginFunctionalTest {
     @ParameterizedTest(name = "Gradle {0}")
     @MethodSource("gradleVersions")
     void worksWithConfigurationCache(String gradleVersion) throws IOException {
-        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.root.io.test:my-lib", "1.0.0-patched"));
+        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.test:my-lib", "1.0.0-root.io.4"));
         writeProjectFiles();
 
         // First build: stores the configuration cache
@@ -246,11 +204,11 @@ class RootIoPatcherPluginFunctionalTest {
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("--configuration-cache", "dependencies", "--configuration", "compileClasspath")
             .build();
 
-        assertTrue(first.getOutput().contains("io.root.io.test:my-lib:1.0.0-patched"),
+        assertTrue(first.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected patched coordinates in first build output:\n" + first.getOutput());
 
         // Second build: must reuse the stored configuration cache
@@ -258,7 +216,7 @@ class RootIoPatcherPluginFunctionalTest {
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("--configuration-cache", "dependencies", "--configuration", "compileClasspath")
             .build();
 
@@ -266,7 +224,7 @@ class RootIoPatcherPluginFunctionalTest {
             second.getOutput().contains("Configuration cache entry reused") ||
             second.getOutput().contains("Reusing configuration cache"),
             "Expected second build to reuse configuration cache:\n" + second.getOutput());
-        assertTrue(second.getOutput().contains("io.root.io.test:my-lib:1.0.0-patched"),
+        assertTrue(second.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected patched coordinates in second build output:\n" + second.getOutput());
     }
 
@@ -290,7 +248,7 @@ class RootIoPatcherPluginFunctionalTest {
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("dependencies", "--configuration", "compileClasspath")
             .build();
 
@@ -303,17 +261,17 @@ class RootIoPatcherPluginFunctionalTest {
     void returnsAlternativePatchWhenPreferredPatchIsIgnored(String gradleVersion) throws IOException {
         // The API receives the ignore list and returns an alternative patch
         AtomicReference<String> capturedRequestBody = new AtomicReference<>();
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             capturedRequestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] bytes = patchResponseJson("io.test:my-lib", "1.0.0",
-                "io.root.io.test:my-lib", "1.0.0-root.io.4").getBytes(StandardCharsets.UTF_8);
+                "io.test:my-lib", "1.0.0-root.io.4").getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         });
 
         File repoDir = new File(projectDir, "local-repo");
         createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0");
-        createFakeArtifact(repoDir, "io.root.io.test", "my-lib", "1.0.0-root.io.4");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0-root.io.4");
         Files.writeString(new File(projectDir, "settings.gradle.kts").toPath(),
             "rootProject.name = \"test-project\"\n");
         writeBuildGradleKtsWithIgnore(repoDir.toURI().toString(), "http://localhost:" + port,
@@ -323,7 +281,7 @@ class RootIoPatcherPluginFunctionalTest {
             .withProjectDir(projectDir)
             .withPluginClasspath()
             .withGradleVersion(gradleVersion)
-            .withEnvironment(baseEnv())
+            .withEnvironment(env())
             .withArguments("dependencies", "--configuration", "compileClasspath")
             .build();
 
@@ -333,7 +291,7 @@ class RootIoPatcherPluginFunctionalTest {
             "Expected ignore entry in API request body:\n" + capturedRequestBody.get());
 
         // The alternative patch (not the ignored one) was substituted
-        assertTrue(result.getOutput().contains("io.root.io.test:my-lib:1.0.0-root.io.4"),
+        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4"),
             "Expected alternative patch in output:\n" + result.getOutput());
         assertFalse(result.getOutput().contains("1.0.0-root.io.5"),
             "Expected ignored patch version NOT in output:\n" + result.getOutput());
@@ -428,21 +386,10 @@ class RootIoPatcherPluginFunctionalTest {
     }
 
     private static String patchResponseJson(String packageName, String version, String patchedName, String patchedVersion) {
-        return patchResponseJson(packageName, version, patchedName, patchedVersion, null, null);
-    }
-
-    /** Same, plus the non-aliased {@code patch} object — for exercising {@code useAlias = false}. */
-    private static String patchResponseJson(
-            String packageName, String version,
-            String patchedName, String patchedVersion,
-            String upstreamName, String upstreamVersion) {
         Map<String, Object> patch = new java.util.LinkedHashMap<>();
         patch.put("package_name", packageName);
         patch.put("version", version);
-        patch.put("patch_alias", Map.of("name", patchedName, "version", patchedVersion));
-        if (upstreamName != null) {
-            patch.put("patch", Map.of("name", upstreamName, "version", upstreamVersion));
-        }
+        patch.put("patch", Map.of("name", patchedName, "version", patchedVersion));
         patch.put("cve_ids", List.of());
         return JsonOutput.toJson(Map.of("patches", List.of(patch), "skipped", List.of()));
     }
@@ -452,7 +399,7 @@ class RootIoPatcherPluginFunctionalTest {
     }
 
     private void setupServerResponse(int status, String body) {
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(status, status == 200 ? bytes.length : -1);
             if (status == 200) {
@@ -468,7 +415,7 @@ class RootIoPatcherPluginFunctionalTest {
     private void writeProjectFiles() throws IOException {
         File repoDir = new File(projectDir, "local-repo");
         createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0");
-        createFakeArtifact(repoDir, "io.root.io.test", "my-lib", "1.0.0-patched");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0-root.io.4");
 
         Files.writeString(new File(projectDir, "settings.gradle.kts").toPath(),
             "rootProject.name = \"test-project\"\n");
@@ -532,14 +479,11 @@ class RootIoPatcherPluginFunctionalTest {
         }
 
         /**
-         * Returns true if any successfully served path contains {@code groupOrPath}.
-         * Accepts either dot-separated group coordinates ("io.root.io.test") or
-         * slash-separated path form ("io/root/io/test") — dots are normalised to slashes
-         * before matching since Maven repository URLs always use slash-separated paths.
+         * Returns true if any successfully served path contains {@code fragment}
+         * (e.g. a version string to distinguish which repo served which artifact).
          */
-        boolean served(String groupOrPath) {
-            String pathFragment = groupOrPath.replace('.', '/');
-            return servedPaths.stream().anyMatch(p -> p.contains(pathFragment));
+        boolean served(String fragment) {
+            return servedPaths.stream().anyMatch(p -> p.contains(fragment));
         }
 
         @Override

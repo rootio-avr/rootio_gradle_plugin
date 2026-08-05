@@ -25,7 +25,7 @@ You declare:
 implementation("io.netty:netty-handler:4.1.118.Final")
 ```
 
-If Root.io has a patch for that version, Gradle resolves a secure drop-in replacement instead — `io.netty:netty-handler:4.1.118.Final-root.io.1`, sourced from the Root.io registry — without any change to your build file. The `groupId` and `artifactId` are untouched; only the version carries the `-root.io.N` marker. (Patches can also be published under a separate `io.root.*` namespace — see [Aliased vs non-aliased coordinates](#aliased-vs-non-aliased-coordinates).)
+If Root.io has a patch for that version, Gradle resolves a secure drop-in replacement instead — `io.netty:netty-handler:4.1.118.Final-root.io.1`, sourced from the Root.io registry — without any change to your build file. The `groupId` and `artifactId` are untouched; only the version carries the `-root.io.N` marker. See [Patched coordinates](#patched-coordinates).
 
 ## Requirements
 
@@ -263,7 +263,6 @@ All settings are optional beyond the API key. Configure them inside the `rootio 
 | `ttlHours`         | `24`                         | Hours to cache API responses locally. Set to `0` to disable caching.                                                           |
 | `maxRetries`       | `3`                          | Max retry attempts on transient failures (5xx, network errors). Set to `0` to disable retries.                                 |
 | `retryBaseDelayMs` | `1000`                       | Base delay in milliseconds for exponential backoff between retries. Delay doubles on each attempt (1000ms, 2000ms, 4000ms, …). |
-| `useAlias`         | `false`                      | Use the Root.io aliased coordinate (`io.root.<group>:<artifact>`) for patches. By default the patch keeps the upstream `groupId` and only bumps the version. Also settable via `ROOTIO_USE_ALIAS=true`. See [Aliased vs non-aliased coordinates](#aliased-vs-non-aliased-coordinates). |
 | `ignore`           | `[]`                         | Patch versions to skip, as `group:artifact@patch-version`. The ignore list is sent to the API so the server returns the best available alternative patch. See [Ignoring dependencies](#ignoring-dependencies). |
 
 Example — extend the cache TTL and adjust retry behavior:
@@ -276,28 +275,11 @@ rootio {
 }
 ```
 
-### Aliased vs non-aliased coordinates
+### Patched coordinates
 
-The Root.io API returns each patch under two coordinates, and `useAlias` picks which one the plugin substitutes in:
+The plugin substitutes the upstream-group coordinate the Root.io API returns for each patch — for `org.apache.commons:commons-lang3:3.12.0`, that's `org.apache.commons:commons-lang3:3.12.0-root.io.5`.
 
-| Mode | Patched coordinate for `org.apache.commons:commons-lang3:3.12.0` |
-|------|------------------------------------------------------------------|
-| `useAlias = false` (default) | `org.apache.commons:commons-lang3:3.12.0-root.io.5` |
-| `useAlias = true`            | `io.root.org.apache.commons:commons-lang3:3.12.0-root.io.5` |
-
-By default the patched jar keeps the upstream `group:artifact` and only the version changes, so it is the *same Gradle module* as the dependency it replaces. Gradle's ordinary version conflict resolution then dedups it, and the version comparator ranks `3.12.0-root.io.5` above bare `3.12.0` — so the patch wins with no extra machinery.
-
-Aliasing puts patched artifacts in a separate `io.root.*` namespace, which makes them unambiguous in a lockfile or SBOM. The cost is that the patched jar becomes a different module from the upstream one, so both could land on the classpath at once. The plugin prevents that by injecting the upstream capability onto patched components and resolving the resulting conflict — machinery that only exists to serve this mode.
-
-```kotlin
-rootio {
-    useAlias.set(true)
-}
-```
-
-Either way the patched artifact resolves from the same `pkg.root.io/maven` repository, which the plugin registers automatically.
-
-> **Note:** `useAlias` is part of the local cache key, so flipping it does not serve a stale coordinate from a previous build.
+The patched jar keeps the upstream `group:artifact` and only the version changes, so it is the *same Gradle module* as the dependency it replaces. Gradle's ordinary version conflict resolution then dedups it, and the version comparator ranks `3.12.0-root.io.5` above bare `3.12.0` — so the patch wins with no extra machinery. The patched artifact resolves from the `pkg.root.io/maven` repository, which the plugin registers automatically.
 
 ### Ignoring dependencies
 

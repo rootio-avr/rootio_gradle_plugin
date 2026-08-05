@@ -36,8 +36,6 @@ public abstract class RootIoValueSource implements ValueSource<String, RootIoVal
         Property<Long> getRetryBaseDelayMs();
         /** @return ignore entries as "group:artifact@version" strings sent to the API */
         ListProperty<String> getIgnore();
-        /** @return true to read the aliased patch coordinate, false for the upstream-group one */
-        Property<Boolean> getUseAlias();
     }
 
     @Override
@@ -45,7 +43,6 @@ public abstract class RootIoValueSource implements ValueSource<String, RootIoVal
     public String obtain() {
         Parameters p = getParameters();
         List<String> ignoreEntries = p.getIgnore().getOrElse(List.of());
-        boolean useAlias = p.getUseAlias().getOrElse(false);
         RootIoClient client = clientRef.updateAndGet(existing ->
             existing != null ? existing : new RootIoClient(p.getMaxRetries().get(), p.getRetryBaseDelayMs().get()));
         return DepCache.lookup(
@@ -53,13 +50,11 @@ public abstract class RootIoValueSource implements ValueSource<String, RootIoVal
             ignoreEntries,
             new File(p.getRootDirPath().get()),
             p.getTtlHours().get(),
-            useAlias,
             () -> client.query(
                 p.getCoords().get(),
                 ignoreEntries,
                 p.getApiUrl().get(),
-                p.getApiKey().getOrNull(),
-                useAlias
+                p.getApiKey().getOrNull()
             )
         );
     }
