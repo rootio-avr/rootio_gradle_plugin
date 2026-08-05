@@ -53,7 +53,7 @@ class RootIoClientTest {
     void returnsNullWhenNoPatchAvailable() {
         respondWith(200, JsonOutput.toJson(Map.of("patches", List.of(), "skipped", List.of())));
 
-        String result = noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key", true);
 
         assertNull(result);
     }
@@ -69,9 +69,25 @@ class RootIoClientTest {
                 "cve_ids", List.of())),
             "skipped", List.of())));
 
-        String result = noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key", true);
 
         assertEquals("io.root.org.example:foo:1.0-patched", result);
+    }
+
+    @Test
+    void returnsUpstreamGroupCoordsWhenUseAliasIsFalse() {
+        respondWith(200, JsonOutput.toJson(Map.of(
+            "patches", List.of(Map.of(
+                "package_name", "org.example:foo",
+                "version", "1.0",
+                "patch", Map.of("name", "org.example:foo", "version", "1.0-root.io.1"),
+                "patch_alias", Map.of("name", "io.root.org.example:foo", "version", "1.0-root.io.1"),
+                "cve_ids", List.of())),
+            "skipped", List.of())));
+
+        String result = noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key", false);
+
+        assertEquals("org.example:foo:1.0-root.io.1", result);
     }
 
     @Test
@@ -79,7 +95,7 @@ class RootIoClientTest {
         respondWith(500, "");
 
         assertThrows(GradleException.class, () ->
-            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key"));
+            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key", true));
     }
 
     @Test
@@ -87,14 +103,14 @@ class RootIoClientTest {
         respondWith(401, "");
 
         assertThrows(GradleException.class, () ->
-            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key"));
+            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key", true));
     }
 
     @Test
     void throwsGradleExceptionOnConnectionFailure() {
         // Port 1 has no server — connection will be refused
         assertThrows(GradleException.class, () ->
-            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:1", "test-key"));
+            noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:1", "test-key", true));
     }
 
     @Test
@@ -121,7 +137,7 @@ class RootIoClientTest {
             }
         });
 
-        String result = retryClient(3).query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key");
+        String result = retryClient(3).query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key", true);
 
         assertEquals("io.root.org.example:foo:1.0-patched", result);
         assertEquals(3, callCount.get());
@@ -137,7 +153,7 @@ class RootIoClientTest {
         });
 
         assertThrows(GradleException.class, () ->
-            retryClient(3).query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key"));
+            retryClient(3).query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "test-key", true));
 
         assertEquals(1, callCount.get());
     }
@@ -153,7 +169,7 @@ class RootIoClientTest {
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         });
 
-        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, TEST_API_KEY);
+        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, TEST_API_KEY, true);
 
         String expected = "Basic " + Base64.getEncoder().encodeToString((TEST_API_KEY + ":").getBytes(StandardCharsets.UTF_8));
         assertEquals(expected, capturedAuth.get());
@@ -169,7 +185,7 @@ class RootIoClientTest {
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         });
 
-        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, null);
+        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, null, true);
 
         assertNull(capturedAuth.get());
     }
@@ -184,7 +200,7 @@ class RootIoClientTest {
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         });
 
-        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "");
+        noRetryClient().query("org.example:foo:1.0", List.of(), "http://localhost:" + port, "", true);
 
         assertNull(capturedAuth.get());
     }
@@ -198,7 +214,7 @@ class RootIoClientTest {
             exchange.getResponseBody().close();
         });
 
-        String result = noRetryClient().query(":artifact:1.0", List.of(), "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query(":artifact:1.0", List.of(), "http://localhost:" + port, "test-key", true);
 
         assertNull(result);
         assertEquals(0, callCount.get());
@@ -213,7 +229,7 @@ class RootIoClientTest {
             exchange.getResponseBody().close();
         });
 
-        String result = noRetryClient().query("org.example::1.0", List.of(), "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example::1.0", List.of(), "http://localhost:" + port, "test-key", true);
 
         assertNull(result);
         assertEquals(0, callCount.get());
@@ -228,7 +244,7 @@ class RootIoClientTest {
             exchange.getResponseBody().close();
         });
 
-        String result = noRetryClient().query("org.example:artifact:", List.of(), "http://localhost:" + port, "test-key");
+        String result = noRetryClient().query("org.example:artifact:", List.of(), "http://localhost:" + port, "test-key", true);
 
         assertNull(result);
         assertEquals(0, callCount.get());
@@ -248,7 +264,8 @@ class RootIoClientTest {
             "org.example:foo:1.0",
             List.of("org.example:foo@1.0-root.io.5"),
             "http://localhost:" + port,
-            "test-key"
+            "test-key",
+            true
         );
 
         @SuppressWarnings("unchecked")
@@ -275,7 +292,8 @@ class RootIoClientTest {
             "org.example:foo:1.0",
             List.of(),
             "http://localhost:" + port,
-            "test-key"
+            "test-key",
+            true
         );
 
         @SuppressWarnings("unchecked")

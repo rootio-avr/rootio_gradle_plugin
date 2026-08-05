@@ -59,6 +59,7 @@ public class RootIoClient {
 
     private static final String RESPONSE_PATCHES = "patches";
     private static final String RESPONSE_PATCH_ALIAS = "patch_alias";
+    private static final String RESPONSE_PATCH = "patch";
 
     /**
      * Query the Root.io API for a patch for the given dependency, with exponential backoff retries.
@@ -67,10 +68,12 @@ public class RootIoClient {
      * @param coords  Maven GAV string — "group:artifact:version"
      * @param apiUrl  Root.io API base URL (e.g. "<a href="https://api.root.io">...</a>")
      * @param apiKey  Root.io API key (used as HTTP basic auth username)
-     * @return patched GAV string ("io.root.group:artifact:version"), or null if no patch
+     * @param useAlias  true to read the aliased coordinate ("io.root.group:artifact:version"),
+     *                  false to read the upstream-group coordinate ("group:artifact:version-root.io.N")
+     * @return patched GAV string, or null if no patch
      * @throws GradleException after all retries are exhausted, or immediately on 4xx
      */
-    public String query(String coords, List<String> ignoreEntries, String apiUrl, String apiKey) {
+    public String query(String coords, List<String> ignoreEntries, String apiUrl, String apiKey, boolean useAlias) {
         String[] parts = coords.split(":", 3);
         if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
             logger.warn("Skipping malformed coords (expected group:artifact:version): {}", coords);
@@ -89,7 +92,7 @@ public class RootIoClient {
                 int status = response.statusCode();
                 if (status == 200) {
                     logger.debug("Root.io API response for {}: {}", coords, response.body());
-                    return extractPatchedCoords(response.body());
+                    return extractPatchedCoords(response.body(), useAlias);
                 }
                 if (status >= 500) {
                     lastException = new GradleException("Root.io API returned HTTP " + status + " for " + coords);
@@ -178,7 +181,8 @@ public class RootIoClient {
     }
 
     @SuppressWarnings("unchecked")
-    private static String extractPatchedCoords(String json) {
+    private static String extractPatchedCoords(String json, boolean useAlias) {
+        String field = useAlias ? RESPONSE_PATCH_ALIAS : RESPONSE_PATCH;
         try {
             Map<String, Object> root = (Map<String, Object>) new JsonSlurper().parseText(json);
             List<Map<String, Object>> patches = (List<Map<String, Object>>) root.get(RESPONSE_PATCHES);
@@ -186,20 +190,20 @@ public class RootIoClient {
                 return null;
             }
 
-            Map<String, Object> patchAlias = (Map<String, Object>) patches.get(0).get(RESPONSE_PATCH_ALIAS);
-            if (patchAlias == null) {
+            Map<String, Object> patch = (Map<String, Object>) patches.get(0).get(field);
+            if (patch == null) {
                 return null;
             }
 
-            String name = (String) patchAlias.get(REQUEST_PACKAGE_NAME);
+            String name = (String) patch.get(REQUEST_PACKAGE_NAME);
             if (name == null || name.isEmpty()) {
-                logger.warn("Root.io API returned patch alias without name: {}", patchAlias);
+                logger.warn("Root.io API returned {} without name: {}", field, patch);
                 return null;
             }
 
-            String version = (String) patchAlias.get(REQUEST_PACKAGE_VERSION);
+            String version = (String) patch.get(REQUEST_PACKAGE_VERSION);
             if (version == null || version.isEmpty()) {
-                logger.warn("Root.io API returned patch alias without version: {}", patchAlias);
+                logger.warn("Root.io API returned {} without version: {}", field, patch);
                 return null;
             }
 

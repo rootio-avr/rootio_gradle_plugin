@@ -68,11 +68,51 @@ class RootIoPatcherPluginFunctionalTest {
      */
     private Map<String, String> baseEnv() {
         Map<String, String> env = new HashMap<>(System.getenv());
+        // These scenarios assert on aliased coords (io.root.io.test:*), and their stub responses
+        // carry only patch_alias, so they opt into aliasing. The default (non-aliased) path is
+        // covered by substitutesUpstreamGroupCoordByDefault below.
+        env.put("ROOTIO_USE_ALIAS", "true");
         String javaHome = System.getProperty("test.javaHome");
         if (javaHome != null && !javaHome.isBlank()) {
             env.put("JAVA_HOME", javaHome);
         }
         return env;
+    }
+
+    /** baseEnv() minus the aliasing opt-in, exercising the plugin's default coord selection. */
+    private Map<String, String> defaultEnv() {
+        Map<String, String> env = baseEnv();
+        env.remove("ROOTIO_USE_ALIAS");
+        return env;
+    }
+
+    @ParameterizedTest(name = "Gradle {0}")
+    @MethodSource("gradleVersions")
+    void substitutesUpstreamGroupCoordByDefault(String gradleVersion) throws IOException {
+        setupServerResponse(200, patchResponseJson(
+            "io.test:my-lib", "1.0.0", "io.root.io.test:my-lib", "1.0.0-root.io.4",
+            "io.test:my-lib", "1.0.0-root.io.4"));
+
+        File repoDir = new File(projectDir, "local-repo");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0-root.io.4");
+        Files.writeString(new File(projectDir, "settings.gradle.kts").toPath(),
+            "rootProject.name = \"test-project\"\n");
+        writeBuildGradleKts(repoDir.toURI().toString(), "http://localhost:" + port, null, null, false);
+
+        BuildResult result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withGradleVersion(gradleVersion)
+            .withEnvironment(defaultEnv())
+            .withArguments("dependencies", "--configuration", "compileClasspath")
+            .build();
+
+        assertTrue(result.getOutput().contains("io.test:my-lib:1.0.0 -> 1.0.0-root.io.4")
+                || result.getOutput().contains("io.test:my-lib:1.0.0-root.io.4"),
+            "Expected upstream-group patched coords in output:\n" + result.getOutput());
+        assertFalse(result.getOutput().contains("io.root.io.test"),
+            "Expected no aliased coords when useAlias defaults to false:\n" + result.getOutput());
     }
 
     @ParameterizedTest(name = "Gradle {0}")
@@ -388,11 +428,21 @@ class RootIoPatcherPluginFunctionalTest {
     }
 
     private static String patchResponseJson(String packageName, String version, String patchedName, String patchedVersion) {
-        Map<String, Object> patchAlias = Map.of("name", patchedName, "version", patchedVersion);
+        return patchResponseJson(packageName, version, patchedName, patchedVersion, null, null);
+    }
+
+    /** Same, plus the non-aliased {@code patch} object — for exercising {@code useAlias = false}. */
+    private static String patchResponseJson(
+            String packageName, String version,
+            String patchedName, String patchedVersion,
+            String upstreamName, String upstreamVersion) {
         Map<String, Object> patch = new java.util.LinkedHashMap<>();
         patch.put("package_name", packageName);
         patch.put("version", version);
-        patch.put("patch_alias", patchAlias);
+        patch.put("patch_alias", Map.of("name", patchedName, "version", patchedVersion));
+        if (upstreamName != null) {
+            patch.put("patch", Map.of("name", upstreamName, "version", upstreamVersion));
+        }
         patch.put("cve_ids", List.of());
         return JsonOutput.toJson(Map.of("patches", List.of(patch), "skipped", List.of()));
     }
