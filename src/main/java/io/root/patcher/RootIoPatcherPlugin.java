@@ -35,23 +35,18 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         extension.getMaxRetries().convention(3);
         extension.getRetryBaseDelayMs().convention(1000L);
         extension.getAllowInsecurePkgRepo().convention(false);
-        extension.getUseAlias().convention("true".equalsIgnoreCase(System.getenv("ROOTIO_USE_ALIAS")));
         // apiKey resolved automatically from .env, systemProp, or env var
         // it will throw an exception if not set later on in afterEvaluate
         apiKeyResolver.resolve(project.getRootDir()).ifPresent(key -> extension.getApiKey().convention(key));
 
         project.afterEvaluate(p -> registerRootMavenRepo(p, extension));
 
-        // Capability injection — only relevant under the opt-in `useAlias = true`, where the
-        // patched coord (io.root.<G>:<A>:<V>-root.io.N) is a different Gradle module from its
-        // upstream sibling and both could land on the classpath at once. The rule declares the
-        // secondary capability (G, A, V) so the conflict detector fires instead.
-        // See `RootIoCapabilityRule`.
-        //
-        // Registered unconditionally: by default the patched coord keeps the upstream group, so
-        // no io.root.* component reaches the rule and it self-skips. Deduping in the default
-        // path is Gradle's ordinary version conflict resolution, which ranks "1.2.3-root.io.1"
-        // above bare "1.2.3" for free.
+        // Capability injection — relevant only if a component with an io.root.* group ever
+        // reaches the rule (e.g. a dependency declared that way directly); the patcher itself
+        // always keeps the upstream group and only bumps the version
+        // ({@code <group>:<artifact>:<fixed>-root.io.N}), so it self-skips in the common case.
+        // See `RootIoCapabilityRule`. Deduping in that common case is Gradle's ordinary version
+        // conflict resolution, which ranks "1.2.3-root.io.1" above bare "1.2.3" for free.
         project.getDependencies().getComponents().all(RootIoCapabilityRule.class);
 
         // IgnoreList must be built after the build script's rootio { } block is evaluated.
@@ -142,7 +137,6 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             spec.getParameters().getMaxRetries().set(ext.getMaxRetries());
             spec.getParameters().getRetryBaseDelayMs().set(ext.getRetryBaseDelayMs());
             spec.getParameters().getIgnore().set(ignoreEntries);
-            spec.getParameters().getUseAlias().set(ext.getUseAlias());
         });
         // gets from cache if available or resolves from Root.io if not
         String patched = patchedProvider.getOrNull();

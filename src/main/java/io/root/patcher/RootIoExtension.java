@@ -62,15 +62,6 @@ public abstract class RootIoExtension {
     public abstract Property<Boolean> getAllowInsecurePkgRepo();
 
     /**
-     * Use the Root.io aliased coordinate ({@code io.root.<group>:<artifact>:<fixed>}) for patches.
-     * Default: false — the patch keeps the upstream groupId and only bumps the version
-     * ({@code <group>:<artifact>:<fixed>-root.io.N}), which Gradle dedups as an ordinary version
-     * conflict. Set to true to opt into the aliased namespace instead.
-     * @return the property
-     */
-    public abstract Property<Boolean> getUseAlias();
-
-    /**
      * Coordinates to skip patching, each as {@code group:artifact@version}.
      * Merged with the {@code .rootioignore} file and {@code -Prootio.ignore}.
      * @return the property

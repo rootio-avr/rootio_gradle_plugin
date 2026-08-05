@@ -34,13 +34,11 @@ public class DepCache {
      * @param coords    Maven GAV string — "group:artifact:version"
      * @param rootDir   project root directory (always use {@code project.getRootDir()})
      * @param ttlHours  cache TTL in hours
-     * @param useAlias  whether the cached coord is the aliased one; part of the cache key so
-     *                  flipping {@code rootio { useAlias }} does not serve a stale coord
      * @param onMiss    called when the cache is cold or stale; may return null (no patch)
      * @return patched GAV string, or null if no patch exists
      */
-    public static String lookup(String coords, List<String> ignoreEntries, File rootDir, long ttlHours, boolean useAlias, Supplier<String> onMiss) {
-        File cacheFile = cacheFile(coords, ignoreEntries, useAlias, rootDir);
+    public static String lookup(String coords, List<String> ignoreEntries, File rootDir, long ttlHours, Supplier<String> onMiss) {
+        File cacheFile = cacheFile(coords, ignoreEntries, rootDir);
 
         if (cacheFile.exists() && isWithinTtl(cacheFile, ttlHours)) {
             logger.debug("Using cached patch for {} from {}", coords, cacheFile);
@@ -60,7 +58,7 @@ public class DepCache {
         return ageMs < ttlHours * 3_600_000L;
     }
 
-    private static File cacheFile(String coords, List<String> ignoreEntries, boolean useAlias, File rootDir) {
+    private static File cacheFile(String coords, List<String> ignoreEntries, File rootDir) {
         File dir = new File(rootDir, CACHE_SUBDIR);
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
@@ -70,12 +68,9 @@ public class DepCache {
             Collections.sort(sorted);
             cacheKey = coords + "|" + String.join(",", sorted);
         }
-        // The suffix goes on the non-aliased mode specifically: the unsuffixed key already holds
-        // aliased coords written by plugin versions that predate this flag, and serving one of
-        // those to a non-aliased build would substitute the wrong groupId.
-        if (!useAlias) {
-            cacheKey = cacheKey + "|noalias";
-        }
+        // Distinguishes from cache entries written by plugin versions that predate this flag's
+        // removal, whose unsuffixed key may hold an aliased coord under useAlias=true.
+        cacheKey = cacheKey + "|noalias";
         return new File(dir, sha1(cacheKey) + ".json");
     }
 

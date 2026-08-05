@@ -65,9 +65,6 @@ class RootIoPatcherPluginCapabilityTest {
 
     private Map<String, String> baseEnv() {
         Map<String, String> env = new HashMap<>(System.getenv());
-        // Every scenario here is about the aliased coord splitting one module into two, which is
-        // the only case where capabilities come into play — so opt in explicitly.
-        env.put("ROOTIO_USE_ALIAS", "true");
         String javaHome = System.getProperty("test.javaHome");
         if (javaHome != null && !javaHome.isBlank()) {
             env.put("JAVA_HOME", javaHome);
@@ -100,11 +97,11 @@ class RootIoPatcherPluginCapabilityTest {
     void f4_happyPath_singlePatchedNoConflict(String gradleVersion) throws IOException {
         File repoDir = new File(projectDir, "local-repo");
         createFakeArtifact(repoDir, "org.example", "vulnerable-lib", "1.0");
-        createFakeArtifact(repoDir, "io.root.org.example", "vulnerable-lib", "1.0-root.io.1");
+        createFakeArtifact(repoDir, "org.example", "vulnerable-lib", "1.0-root.io.1");
         setupVersionAwareApiServer(req ->
             req.contains("\"version\":\"1.0\"") && req.contains("vulnerable-lib")
                 ? patchJson("org.example:vulnerable-lib", "1.0",
-                    "io.root.org.example:vulnerable-lib", "1.0-root.io.1")
+                    "org.example:vulnerable-lib", "1.0-root.io.1")
                 : emptyJson());
         writeBuildScript(gradleVersion,
             "implementation(\"org.example:vulnerable-lib:1.0\")");
@@ -147,7 +144,7 @@ class RootIoPatcherPluginCapabilityTest {
             List.of("ch.qos.logback:logback-core:1.1.3"));
         createFakeArtifact(repoDir, "ch.qos.logback", "logback-core", "1.1.3");
         createFakeArtifact(repoDir, "ch.qos.logback", "logback-core", "1.5.8");
-        createFakeArtifact(repoDir, "io.root.ch.qos.logback", "logback-core", "1.1.3-root.io.1");
+        createFakeArtifact(repoDir, "ch.qos.logback", "logback-core", "1.1.3-root.io.1");
         // :subB just an inert lib
         createFakeArtifact(repoDir, "org.example", "inert-lib", "1.0");
         setupPatchOnly113();
@@ -386,7 +383,7 @@ class RootIoPatcherPluginCapabilityTest {
             List.of("ch.qos.logback:logback-core:1.1.3"));
         createFakeArtifact(repoDir, "ch.qos.logback", "logback-core", "1.1.3");
         createFakeArtifact(repoDir, "ch.qos.logback", "logback-core", "1.5.8");
-        createFakeArtifact(repoDir, "io.root.ch.qos.logback", "logback-core", "1.1.3-root.io.1");
+        createFakeArtifact(repoDir, "ch.qos.logback", "logback-core", "1.1.3-root.io.1");
     }
 
     /** Mock backend returns the patch for logback-core:1.1.3, empty otherwise. */
@@ -394,7 +391,7 @@ class RootIoPatcherPluginCapabilityTest {
         setupVersionAwareApiServer(req ->
             req.contains("\"version\":\"1.1.3\"") && req.contains("logback-core")
                 ? patchJson("ch.qos.logback:logback-core", "1.1.3",
-                    "io.root.ch.qos.logback:logback-core", "1.1.3-root.io.1")
+                    "ch.qos.logback:logback-core", "1.1.3-root.io.1")
                 : emptyJson());
     }
 
@@ -434,11 +431,10 @@ class RootIoPatcherPluginCapabilityTest {
     }
 
     private static String patchJson(String pkg, String version, String patchedName, String patchedVersion) {
-        Map<String, Object> patchAlias = Map.of("name", patchedName, "version", patchedVersion);
         Map<String, Object> patch = new java.util.LinkedHashMap<>();
         patch.put("package_name", pkg);
         patch.put("version", version);
-        patch.put("patch_alias", patchAlias);
+        patch.put("patch", Map.of("name", patchedName, "version", patchedVersion));
         patch.put("cve_ids", List.of());
         return JsonOutput.toJson(Map.of("patches", List.of(patch), "skipped", List.of()));
     }
