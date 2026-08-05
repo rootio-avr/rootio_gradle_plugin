@@ -303,7 +303,7 @@ class RootIoPatcherPluginFunctionalTest {
     void returnsAlternativePatchWhenPreferredPatchIsIgnored(String gradleVersion) throws IOException {
         // The API receives the ignore list and returns an alternative patch
         AtomicReference<String> capturedRequestBody = new AtomicReference<>();
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             capturedRequestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] bytes = patchResponseJson("io.test:my-lib", "1.0.0",
                 "io.root.io.test:my-lib", "1.0.0-root.io.4").getBytes(StandardCharsets.UTF_8);
@@ -452,7 +452,7 @@ class RootIoPatcherPluginFunctionalTest {
     }
 
     private void setupServerResponse(int status, String body) {
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(status, status == 200 ? bytes.length : -1);
             if (status == 200) {

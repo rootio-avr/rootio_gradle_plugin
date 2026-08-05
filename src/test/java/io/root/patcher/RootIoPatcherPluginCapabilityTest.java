@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Functional tests for the capability-based deduplication of patched coords.
  *
- * <p>Each scenario plants a fake local Maven repo, starts a mock {@code /v3/analyze/maven}
+ * <p>Each scenario plants a fake local Maven repo, starts a mock {@code /v3/analyze/v2/maven}
  * HTTP server, writes a per-test {@code build.gradle.kts}, runs Gradle via TestKit,
  * and asserts on the resolved compileClasspath jar list.
  */
@@ -448,7 +448,7 @@ class RootIoPatcherPluginCapabilityTest {
     }
 
     private void setupServerResponse(String body) {
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
             try (OutputStream os = exchange.getResponseBody()) {
@@ -459,7 +459,7 @@ class RootIoPatcherPluginCapabilityTest {
 
     /** Mock backend with per-request decision based on the request body. */
     private void setupVersionAwareApiServer(java.util.function.Function<String, String> router) {
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             byte[] body = exchange.getRequestBody().readAllBytes();
             String requestBody = new String(body, StandardCharsets.UTF_8);
             String response = router.apply(requestBody);

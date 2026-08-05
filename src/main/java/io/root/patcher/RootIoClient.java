@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.IntToLongFunction;
 
-/** HTTP client for querying the Root.io {@code /v3/analyze/maven} API, with exponential backoff retries. */
+/** HTTP client for querying the Root.io {@code /v3/analyze/v2/maven} API, with exponential backoff retries. */
 public class RootIoClient {
     private static final Logger logger = Logging.getLogger(RootIoClient.class);
 
@@ -50,7 +50,7 @@ public class RootIoClient {
         this.retryDelayMs = retryDelayMs;
     }
 
-    private static final String ENDPOINT_ANALYZE_MAVEN = "/v3/analyze/maven";
+    private static final String ENDPOINT_ANALYZE_MAVEN = "/v3/analyze/v2/maven";
 
     private static final String REQUEST_PACKAGES = "packages";
     private static final String REQUEST_PACKAGE_NAME = "name";

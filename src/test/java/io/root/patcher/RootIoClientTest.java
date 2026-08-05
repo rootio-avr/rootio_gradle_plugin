@@ -121,7 +121,7 @@ class RootIoClientTest {
                 "patch_alias", Map.of("name", "io.root.org.example:foo", "version", "1.0-patched"))),
             "skipped", List.of()));
 
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             byte[] bytes;
             int status;
             if (callCount.incrementAndGet() < 3) {
@@ -146,7 +146,7 @@ class RootIoClientTest {
     @Test
     void doesNotRetryOn4xx() {
         AtomicInteger callCount = new AtomicInteger(0);
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             callCount.incrementAndGet();
             exchange.sendResponseHeaders(401, -1);
             exchange.getResponseBody().close();
@@ -162,7 +162,7 @@ class RootIoClientTest {
     void sendsCorrectBasicAuthHeaderWhenApiKeyProvided() {
         final String TEST_API_KEY = "test-api-key";
         AtomicReference<String> capturedAuth = new AtomicReference<>();
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             capturedAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] bytes = JsonOutput.toJson(Map.of("patches", List.of())).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
@@ -178,7 +178,7 @@ class RootIoClientTest {
     @Test
     void omitsAuthHeaderWhenApiKeyIsNull() {
         AtomicReference<String> capturedAuth = new AtomicReference<>("not-set");
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             capturedAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] bytes = JsonOutput.toJson(Map.of("patches", List.of())).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
@@ -193,7 +193,7 @@ class RootIoClientTest {
     @Test
     void omitsAuthHeaderWhenApiKeyIsEmpty() {
         AtomicReference<String> capturedAuth = new AtomicReference<>("not-set");
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             capturedAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] bytes = JsonOutput.toJson(Map.of("patches", List.of())).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
@@ -208,7 +208,7 @@ class RootIoClientTest {
     @Test
     void returnsNullAndSkipsRequestForMissingGroup() {
         AtomicInteger callCount = new AtomicInteger(0);
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             callCount.incrementAndGet();
             exchange.sendResponseHeaders(200, -1);
             exchange.getResponseBody().close();
@@ -223,7 +223,7 @@ class RootIoClientTest {
     @Test
     void returnsNullAndSkipsRequestForMissingArtifact() {
         AtomicInteger callCount = new AtomicInteger(0);
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             callCount.incrementAndGet();
             exchange.sendResponseHeaders(200, -1);
             exchange.getResponseBody().close();
@@ -238,7 +238,7 @@ class RootIoClientTest {
     @Test
     void returnsNullAndSkipsRequestForMissingVersion() {
         AtomicInteger callCount = new AtomicInteger(0);
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             callCount.incrementAndGet();
             exchange.sendResponseHeaders(200, -1);
             exchange.getResponseBody().close();
@@ -253,7 +253,7 @@ class RootIoClientTest {
     @Test
     void sendsIgnoreListInRequestBody() throws Exception {
         AtomicReference<String> capturedBody = new AtomicReference<>();
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] bytes = JsonOutput.toJson(Map.of("patches", List.of())).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
@@ -281,7 +281,7 @@ class RootIoClientTest {
     @Test
     void omitsIgnoreFieldWhenListIsEmpty() throws Exception {
         AtomicReference<String> capturedBody = new AtomicReference<>();
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] bytes = JsonOutput.toJson(Map.of("patches", List.of())).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
@@ -302,7 +302,7 @@ class RootIoClientTest {
     }
 
     private void respondWith(int status, String body) {
-        server.createContext("/v3/analyze/maven", exchange -> {
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(status, status == 200 ? bytes.length : -1);
             if (status == 200) {
