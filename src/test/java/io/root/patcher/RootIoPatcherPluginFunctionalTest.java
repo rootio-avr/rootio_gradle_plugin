@@ -297,6 +297,72 @@ class RootIoPatcherPluginFunctionalTest {
             "Expected ignored patch version NOT in output:\n" + result.getOutput());
     }
 
+    @ParameterizedTest(name = "Gradle {0}")
+    @MethodSource("gradleVersions")
+    void reappliesPatchWhenAnotherRuleRevertsAnAlreadyPatchedCoordinate(String gradleVersion) throws IOException {
+        // Simulates a dependency arriving already at a patched sibling's coordinate (as it
+        // would transitively via another Root.io-patched artifact's own POM), which another
+        // plugin's eachDependency rule then reverts to bare by version alone. We must notice
+        // via getTarget() and re-patch, not silently accept the revert via a frozen getRequested().
+        server.createContext("/v3/analyze/v2/maven", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String response = body.contains("\"version\":\"1.0.0\"")
+                ? patchResponseJson("io.test:my-lib", "1.0.0", "io.test:my-lib", "1.0.0-root.io.4")
+                : emptyPatchResponseJson();
+            byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+
+        File repoDir = new File(projectDir, "local-repo");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0-root.io.9");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0-root.io.4");
+        Files.writeString(new File(projectDir, "settings.gradle.kts").toPath(),
+            "rootProject.name = \"test-project\"\n");
+        writeBuildGradleKtsWithImpostorRule(repoDir.toURI().toString(), "http://localhost:" + port,
+            "io.test:my-lib:1.0.0-root.io.9", "1.0.0");
+
+        BuildResult result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withGradleVersion(gradleVersion)
+            .withEnvironment(env())
+            .withArguments("dependencies", "--configuration", "compileClasspath")
+            .build();
+
+        assertTrue(result.getOutput().contains("1.0.0-root.io.4"),
+            "Expected Root.io's patch to win over the other rule's revert:\n" + result.getOutput());
+    }
+
+    @ParameterizedTest(name = "Gradle {0}")
+    @MethodSource("gradleVersions")
+    void winsOverAnotherRulesUnconditionalRevertRegardlessOfDeclarationOrder(String gradleVersion) throws IOException {
+        // Simulates a BOM-management-style rule that unconditionally reverts a managed
+        // dependency's version, registered directly in the build script (i.e. immediately,
+        // not deferred). Must lose to Root.io's rule even though io.root.patcher is declared
+        // first in the plugins {} block — declaration order isn't registration order.
+        setupServerResponse(200, patchResponseJson("io.test:my-lib", "1.0.0", "io.test:my-lib", "1.0.0-root.io.4"));
+
+        File repoDir = new File(projectDir, "local-repo");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0");
+        createFakeArtifact(repoDir, "io.test", "my-lib", "1.0.0-root.io.4");
+        Files.writeString(new File(projectDir, "settings.gradle.kts").toPath(),
+            "rootProject.name = \"test-project\"\n");
+        writeBuildGradleKtsWithImpostorRule(repoDir.toURI().toString(), "http://localhost:" + port,
+            "io.test:my-lib:1.0.0", "1.0.0");
+
+        BuildResult result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withGradleVersion(gradleVersion)
+            .withEnvironment(env())
+            .withArguments("dependencies", "--configuration", "compileClasspath")
+            .build();
+
+        assertTrue(result.getOutput().contains("1.0.0-root.io.4"),
+            "Expected Root.io's patch to win despite being declared first:\n" + result.getOutput());
+    }
+
     // --- Helpers ---
 
     private static final String BUILD_SCRIPT_TEMPLATE =
@@ -383,6 +449,36 @@ class RootIoPatcherPluginFunctionalTest {
         } catch (ClassNotFoundException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    // Like writeBuildGradleKts, but adds a plain configurations.all/eachDependency rule
+    // (registered immediately, simulating another plugin's synchronous apply()) that
+    // unconditionally reverts io.test:my-lib to revertToVersion.
+    private void writeBuildGradleKtsWithImpostorRule(String repoUri, String apiUrl,
+            String dependencyCoords, String revertToVersion) throws IOException {
+        String content =
+            "plugins {\n" +
+            "    id(\"io.root.patcher\")\n" +
+            "    java\n" +
+            "}\n" +
+            "repositories {\n" +
+            "    maven { url = uri(\"" + repoUri + "\") }\n" +
+            "}\n" +
+            "dependencies {\n" +
+            "    implementation(\"" + dependencyCoords + "\")\n" +
+            "}\n" +
+            "rootio {\n" +
+            "    apiKey.set(\"test-key\")\n" +
+            "    apiUrl.set(\"" + apiUrl + "\")\n" +
+            "}\n" +
+            "configurations.all {\n" +
+            "    resolutionStrategy.eachDependency {\n" +
+            "        if (target.group == \"io.test\" && target.name == \"my-lib\") {\n" +
+            "            useVersion(\"" + revertToVersion + "\")\n" +
+            "        }\n" +
+            "    }\n" +
+            "}\n";
+        Files.writeString(new File(projectDir, "build.gradle.kts").toPath(), content);
     }
 
     private static String patchResponseJson(String packageName, String version, String patchedName, String patchedVersion) {
