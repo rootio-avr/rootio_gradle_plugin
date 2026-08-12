@@ -45,8 +45,7 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         // reaches the rule (e.g. a dependency declared that way directly); the patcher itself
         // always keeps the upstream group and only bumps the version
         // ({@code <group>:<artifact>:<fixed>-root.io.N}), so it self-skips in the common case.
-        // See `RootIoCapabilityRule`. Deduping in that common case is Gradle's ordinary version
-        // conflict resolution, which ranks "1.2.3-root.io.1" above bare "1.2.3" for free.
+        // See `RootIoCapabilityRule`.
         project.getDependencies().getComponents().all(RootIoCapabilityRule.class);
 
         // IgnoreList must be built after the build script's rootio { } block is evaluated.
@@ -56,7 +55,9 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
         project.afterEvaluate(p ->
             ignoreEntriesHolder[0] = IgnoreList.load(p.getRootDir(), resolveIgnoreEntries(p, extension)).toApiEntries());
 
-        project.getConfigurations().all(config -> {
+        // Deferred to afterEvaluate so our eachDependency rule registers after other plugins'
+        // (e.g. io.spring.dependency-management), which run synchronously in apply().
+        project.afterEvaluate(p -> project.getConfigurations().all(config -> {
             // Only hook resolvable configurations — non-resolvable ones (e.g. `api`, `implementation`)
             // are for declaring dependencies and do not support eachDependency. Their dependencies
             // are still patched because resolvable configurations (e.g. `compileClasspath`,
@@ -77,7 +78,7 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
             // picking the patched candidate (same upstream version means identical API
             // surface plus security fix).
             config.getResolutionStrategy().getCapabilitiesResolution().all(RootIoPatcherPlugin::resolveCapabilityConflict);
-        });
+        }));
     }
 
     // Auto-register the Root.io patches Maven repository so patched artifacts resolve
@@ -105,7 +106,8 @@ public class RootIoPatcherPlugin implements Plugin<Project> {
     }
 
     private static void handleDependency(Project project, DependencyResolveDetails details, RootIoExtension extension, List<String> ignoreEntries) {
-        ModuleVersionSelector req = details.getRequested();
+        // getTarget(), not getRequested() — reflects any earlier eachDependency rule's changes.
+        ModuleVersionSelector req = details.getTarget();
         String version = req.getVersion();
 
         // Skip deps with no version — these are BOM/platform-managed or Kotlin-plugin-managed
